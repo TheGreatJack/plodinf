@@ -12,7 +12,7 @@ plodinf_help() {
     Authors:
 	    Andres Florian Cruz
     	Juan Picon Cossio
-	    Elisa Correa Perez
+	    Elisa Correa Pineda
 
     Version: 0.1
 
