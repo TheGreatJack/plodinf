@@ -1,8 +1,11 @@
 #!/bin/bash
 
 ## DEFAULT VALUES
-
-
+minimum_ad=3
+minimum_depth=12
+threads=4
+output_dir='mitnanex_results/'
+wd="./"
 
 ## Help message
 plodinf_help() {
@@ -21,15 +24,17 @@ plodinf_help() {
     Options:
         -i        Input file. [required].
         -t        Threads. [4].
-        -w        Working directory. Path to create the folder which will contain all mitnanex information. [./mitnanex_results].
+        -w        Working directory. Path to create the folder which will contain all mitnanex information. [./plodinf_results].
         -r        Prefix name add to every produced file. [input file name].
-        -d        Different output directory. Create a different output directory every run (it uses the date and time). [False].
+        -z        Different output directory. Create a different output directory every run (it uses the date and time). [False].
+        -m        Minimum number of reads per allele in a site. [3].
+        -d        Minimum real depth per site. [12].
         *         Help.
     "
     exit 1
 }
 
-while getopts 'i:t:m:w:r:d' opt; do
+while getopts 'i:t:m:w:r:zm:d:' opt; do
     case $opt in
         i)
         input_file=$OPTARG
@@ -43,8 +48,14 @@ while getopts 'i:t:m:w:r:d' opt; do
         r)
         prefix=$OPTARG
         ;;
-        d)
+        z)
         output_dir="plodinf_results_$(date  "+%Y-%m-%d_%H-%M-%S")/"
+        ;;
+        m)
+        minimum_ad=$OPTARG
+        ;;
+        d)
+        minimum_depth=$OPTARG
         ;;
         *)
         plodinf_help
@@ -52,7 +63,34 @@ while getopts 'i:t:m:w:r:d' opt; do
     esac 
 done
 
+# Check if required arguments are provided
+if [ -z "$input_file" ];
+then
+  echo "Error: Input file is required."
+  plodinf_help
+fi
 
+## Add a slash if it is absent in the working directory
+if [ ${wd: -1} = / ];
+then 
+    wd=$wd$output_dir
+else
+    wd=$wd"/"$output_dir
+fi
+
+## CREATE WORKING DIRECTORY
+create_wd(){
+
+    if [ -d $wd ]
+    then
+        echo $timestamp": Rewriting directory..."
+        echo " "
+    else 
+        echo $timestamp": Creating directory..."
+        echo " "
+        mkdir $wd
+    fi
+}
 
 get_snp_count (){
     ## Get the read count for each SNP
@@ -71,5 +109,5 @@ format_snp_file (){
 
 compute_dist_snp(){
     ## Compute the distribution of reads to assign a ploidy base on that distribution
-    python src/allele_counts_parser.py -m $minimum_ad -d $minimum_depth > $out_path/$prefix\_$pop\_allele_prop_m$minimum_ad\_d$minimum_depth.tsv
+    python src/allele_counts_parser.py -m $minimum_ad -d $minimum_depth > $wd"/_allele_prop_m"$minimum_ad"_d"$minimum_depth".tsv"
 }
