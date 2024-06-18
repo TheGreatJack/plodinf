@@ -6,6 +6,8 @@ minimum_depth=12
 threads=4
 output_dir='mitnanex_results/'
 wd="./"
+minimum_coverage="10" 
+prefix=""
 
 ## Help message
 plodinf_help() {
@@ -22,19 +24,20 @@ plodinf_help() {
     Usage: plodinf.sh [options] FASTQ
 
     Options:
-        -i        Input file. [required].
+        -i        Input file. BAM file. [required].
         -t        Threads. [4].
         -w        Working directory. Path to create the folder which will contain all mitnanex information. [./plodinf_results].
         -r        Prefix name add to every produced file. [input file name].
         -z        Different output directory. Create a different output directory every run (it uses the date and time). [False].
         -m        Minimum number of reads per allele in a site. [3].
         -d        Minimum real depth per site. [12].
+        -p        Minimum coverage. [10].
         *         Help.
     "
     exit 1
 }
 
-while getopts 'i:t:m:w:r:zm:d:' opt; do
+while getopts 'i:t:m:w:r:zm:d:p:' opt; do
     case $opt in
         i)
         input_file=$OPTARG
@@ -56,6 +59,9 @@ while getopts 'i:t:m:w:r:zm:d:' opt; do
         ;;
         d)
         minimum_depth=$OPTARG
+        ;;
+        p)
+        minimum_coverage=$OPTARG
         ;;
         *)
         plodinf_help
@@ -94,20 +100,20 @@ create_wd(){
 
 get_snp_count (){
     ## Get the read count for each SNP
-    bcftools mpileup -Q 20 -q 30 --skip-all-unset 3 -a "FORMAT/AD" -Ou --no-reference $bam_file 
+    bcftools mpileup -Q 20 -q 30 --skip-all-unset 3 -a "FORMAT/AD" -Ou --no-reference $input_file
 }
 
 filter_snp(){
     ## Filter SNPs by coverage and quality
-    bcftools filter -Ou -e 'INFO/QS[1] == 1 | INFO/DP <= 10' -
+    bcftools filter -Ou -e "INFO/QS[1] == 1 | INFO/DP < $minimum_coverage" -
 }
     
 format_snp_file (){
-    ## Change the format for the outputted file
+    ## Change the format for the output file
     bcftools query -f '%CHROM\t%POS\t%ALT\t%DP\tQS:%QS[\t%AD]]\n' 
 }
 
 compute_dist_snp(){
-    ## Compute the distribution of reads to assign a ploidy base on that distribution
+    ## Extract the number of reads supporting SNPs
     python src/allele_counts_parser.py -m $minimum_ad -d $minimum_depth > $wd"/_allele_prop_m"$minimum_ad"_d"$minimum_depth".tsv"
 }
