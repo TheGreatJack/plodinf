@@ -6,8 +6,7 @@ minimum_depth=12
 threads=4
 output_dir='mitnanex_results/'
 wd="./"
-minimum_coverage="10" 
-prefix=""
+minimum_coverage="10"
 
 ## Help message
 plodinf_help() {
@@ -84,6 +83,13 @@ else
     wd=$wd"/"$output_dir
 fi
 
+## PREFIX name to use for the resulting files
+if [ -z $prefix ];
+then 
+    prefix=$(basename $input_file)
+    prefix=${prefix%%.*}
+fi
+
 ## CREATE WORKING DIRECTORY
 create_wd(){
 
@@ -100,20 +106,25 @@ create_wd(){
 
 get_snp_count (){
     ## Get the read count for each SNP
-    bcftools mpileup -Q 20 -q 30 --skip-all-unset 3 -a "FORMAT/AD" -Ou --no-reference $input_file
+    bcftools mpileup -Q 20 -q 30 --skip-all-unset 3 -a "FORMAT/AD" -Ou --no-reference $input_file 
 }
 
 filter_snp(){
     ## Filter SNPs by coverage and quality
-    bcftools filter -Ou -e "INFO/QS[1] == 1 | INFO/DP < $minimum_coverage" -
+    bcftools filter -Ou -e "INFO/QS[1] == 1 | INFO/DP < $minimum_coverage" $1
 }
     
 format_snp_file (){
     ## Change the format for the output file
-    bcftools query -f '%CHROM\t%POS\t%ALT\t%DP\tQS:%QS[\t%AD]]\n' 
+    bcftools query -f '%CHROM\t%POS\t%ALT\t%DP\tQS:%QS[\t%AD]]\n' $1 -o $wd"/$prefix"".bfc"
 }
 
 compute_dist_snp(){
     ## Extract the number of reads supporting SNPs
     python src/allele_counts_parser.py -m $minimum_ad -d $minimum_depth > $wd"/_allele_prop_m"$minimum_ad"_d"$minimum_depth".tsv"
 }
+
+
+## Pipeline
+
+#output=$(get_snp_count) && output=$(filter_snp $output) && format_snp_file $output
