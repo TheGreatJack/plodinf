@@ -31,12 +31,14 @@ plodinf_help() {
         -m        Minimum number of reads per allele in a site. [3].
         -d        Minimum real depth per site. [12].
         -p        Minimum coverage. [10].
+        -Q        Minimum mapping quality of an alignment. [20].
+        -q        Minimum base quality. [30].
         *         Help.
     "
     exit 1
 }
 
-while getopts 'i:t:m:w:r:zm:d:p:' opt; do
+while getopts 'i:t:m:w:r:zm:d:p:Q:q' opt; do
     case $opt in
         i)
         input_file=$OPTARG
@@ -61,6 +63,12 @@ while getopts 'i:t:m:w:r:zm:d:p:' opt; do
         ;;
         p)
         minimum_coverage=$OPTARG
+        ;;
+        Q)
+        mapping_quality=$OPTARG
+        ;;
+        q)
+        base_quality=$OPTARG
         ;;
         *)
         plodinf_help
