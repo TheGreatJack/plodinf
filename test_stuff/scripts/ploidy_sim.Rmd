@@ -8,6 +8,10 @@ output: html_document
 
 # Simulation of read_allele_proportions
 
+This simulator allows me to simulate different ploidies, from 2 to 4 n. This simulator sort of reallistically simulated data sampled from rad-seq data
+
+
+## Function definition
 
 ```{r}
 # Function to simulate allele proportions for a single SNP
@@ -38,68 +42,277 @@ simulate_snp <- function(mean_depth, n_sites, ploidy, biallelic_freqs,freqs_prob
   #print(c(prop_a, prop_b))
   
   # Return allele proportions
-  return(c(read_depth,alleles_a,alleles_b,prop_a, prop_b))
+  return(c(biallelic_state,read_depth,alleles_a,alleles_b,prop_a, prop_b))
 }
 
-# Define biallelic frequencies for different ploidies
-biallelic_freqs_diploid <- list(c(0.5, 0.5))
-biallelic_freqs_triploid <- list(c(0.33, 0.66))
-biallelic_freqs_tetraploid <- list(c(0.5,0.5),c(0.25, 0.75))
-
-# Set parameters
-mean_depth <- 20  # Adjust this value as needed
-n_sites <- 10000    # Adjust this value as needed
-
-# Define ploidies to simulate
-ploidies <- c(2, 3, 4)
-
-# Select ploidy randomly
-current_ploidy <- sample(ploidies, size = 1)
-current_ploidy <- 4
-# Get corresponding biallelic frequencies
-if (current_ploidy == 2) {
-  biallelic_freqs <- biallelic_freqs_diploid
-  freqs_prob <- 1
-} else if (current_ploidy == 3) {
-  biallelic_freqs <- biallelic_freqs_triploid
-  freqs_prob <- 1
-} else if (current_ploidy == 4){
-  biallelic_freqs <- biallelic_freqs_tetraploid
-  freqs_prob <- c(0.25,0.75)
-}
-
-print(current_ploidy)
-# Initialize empty matrix to store allele proportions
-#all_props <- matrix(nrow = n_sites, ncol = 5)
-all_props <- data.frame()
-
-# Simulate for each SNP site
-for (i in 1:n_sites) {
+snp_simulator_big <- function(current_ploidy, mean_depth, n_sites, freqs_prob) {
+  freqs_prob <- freqs_prob
+  mean_depth <- mean_depth
+  current_ploidy <- current_ploidy
+  n_sites <- n_sites
   
-  # Simulate and store allele proportions
-  props <- simulate_snp(mean_depth, 1, current_ploidy, biallelic_freqs,freqs_prob)
-  #all_props[i, ] <- props
-  all_props <- rbind(all_props,props)
+  
+  # Define biallelic frequencies for different ploidies
+  biallelic_freqs_diploid <- list(c(0.5, 0.5))
+  biallelic_freqs_triploid <- list(c(0.33, 0.66))
+  biallelic_freqs_tetraploid <- list(c(0.5,0.5),c(0.25, 0.75))
+  
+
+  # Get corresponding biallelic frequencies
+  if (current_ploidy == 2) {
+    biallelic_freqs <- biallelic_freqs_diploid
+    freqs_prob <- 1
+  } else if (current_ploidy == 3) {
+    biallelic_freqs <- biallelic_freqs_triploid
+    freqs_prob <- 1
+  } else if (current_ploidy == 4){
+    biallelic_freqs <- biallelic_freqs_tetraploid
+    #freqs_prob <- c(0.3,0.7)
+  }
+  
+  # Initialize empty matrix to store allele proportions
+  #all_props <- matrix(nrow = n_sites, ncol = 5)
+  all_props <- data.frame()
+  
+  # Simulate for each SNP site
+  for (i in 1:n_sites) {
+    
+    # Simulate and store allele proportions
+    props <- simulate_snp(mean_depth, 1, current_ploidy, biallelic_freqs,freqs_prob)
+    #all_props[i, ] <- props
+    all_props <- rbind(all_props,props)
+  }
+  
+  colnames(all_props) <- c("biallelic_state","read_depth","allele_a_reads","allele_b_reads","allele_prop_a","allele_prop_b")
+  
+  all_props$allele_diff <- all_props$allele_prop_a - all_props$allele_prop_b
+  
+  return(all_props)
 }
-
-colnames(all_props) <- c("read_depth","allele_a_reads","allele_b_reads","allele_prop_a","allele_prop_b")
-
-# Print or further analyze the simulated allele proportions in all_props matrix
-#print(all_props)
 
 ```
-
-
 
 
 # QC filtering and plotting
 
 
 ```{r}
+current_ploidy <- 4 # Tetraploid
+mean_depth <- 20 # profundidad promedio?
+n_sites <- 10000
+freqs_prob <- c(0.3,0.7) # 2 numeros que sumen 1 en tetraploides, de resto 1. el primer numero corresponde a prporcion 0.5/0.5
+
+
+all_props <- snp_simulator_big(current_ploidy, mean_depth, n_sites, freqs_prob)
+
 minimum_allele_depth <- 5
 
 all_props_QC <-all_props[all_props$allele_a_reads >= minimum_allele_depth & all_props$allele_b_reads >= minimum_allele_depth,]
 ```
+
+Here i plot the raw frequencies of the alleles, which they would have peaks at 0.25 0.5 and 0.75. But given the distribution of read sampling there is a limitation on the range of possible values. The distribution is sort of discrete in this sense. 
+
+
+```{r}
+library(ggplot2)
+
+complete_freqs <- c(all_props_QC$allele_prop_a,all_props_QC$allele_prop_b) 
+
+ggplot(as.data.frame(complete_freqs), aes(x = complete_freqs)) +
+  geom_histogram(alpha = 0.5, fill = "blue", binwidth = 0.05) +  # Adjust bins as needed
+  labs(title = "Distribution of allele-snp frequencies", x = "biallelic_frequency") +
+  xlim(0,1)
+```
+
+Another way of representing these distributions is to take the difference of the allelic frequencies. As the frequencies for any snp will always sum to one, no information is lost. Adding over this fact you can even sort the values firts an take the difference between the highest and the lowest value. Which would limit the distribution to positive or negative values if needed. This last option i think is of limited use.... taking the difference is useful for reducing the number of data points?, and it is technically a direct modelling of the associated error, not of the frequencies themselves. If there is any underlying bias in the distribution, there are ways to randomize. 
+
+
+```{r}
+
+n <- 10
+
+for (i in c(1:n)) {
+  inversion_vector <- sample(c(-1,1), size = length(all_props_QC$allele_diff),replace = TRUE)
+  all_props_QC$allele_diff <- all_props_QC$allele_diff * inversion_vector
+}
+
+complete_freq_diff <- all_props_QC$allele_diff
+
+ggplot(as.data.frame(complete_freq_diff), aes(x = complete_freq_diff)) +
+  geom_histogram(alpha = 0.5, fill = "blue", binwidth = 0.05) +  # Adjust bins as needed
+  labs(title = "Distribution of allele-snp frequencies", x = "biallelic_frequency") +
+  xlim(-1,1)
+```
+Lo que veo es que me separa los picos de las distribuciones mas y corregir por sesgos es relativameente sencillo, el hecho de que pueda ser menor o mayor a cero hace automaticamente que la diferencia entre los picos sea como del doble....., creo que esa es la forma mas adecuada de modelarlo.... No creo que sufra por usar menos datos, la mitad de los datos para ser exactos, pero la vuelta es que esos datos son limitados el uno con el otro... hay una dependencia rara ahí. 
+
+
+Ahora me centro en estimar variables o incluso modelar cosas de estos datos simulados, es bueno antes de ponerme a definir los modelos a la loca. Creo que me va tocar hacer luego un monton de simulaciones.... simulaciones validas?
+
+Primero veo el promedio de la distribucion y la varianza de esta diferencia
+
+```{r}
+mean(complete_freq_diff)
+var(complete_freq_diff)
+```
+
+
+```{r}
+# Function to calculate mean, variance, and absolute values
+summary_by_group <- function(data, group_col, value_col) {
+  # Group data by group_col
+  grouped_data <- split(data[, c(group_col, value_col)], data[, group_col])
+  
+  # Calculate summary statistics
+  summary_stats <- sapply(grouped_data, function(x) {
+    c(
+      mean = mean(x[, value_col]),
+      variance = var(x[, value_col])#,
+      #abs_values = abs(x[, value_col])
+    )
+  })
+  
+  print(summary_stats)
+  # Return summary statistics as a data frame
+  return(data.frame(summary_stats))
+}
+
+# Example usage
+# Create sample data
+data <- data.frame(group = c("A", "A", "B", "B", "C"),
+                   value = c(10, 5, -8, 12, 3))
+
+# Get summary statistics
+summary_df <- summary_by_group(all_props_QC, group_col = "biallelic_state", value_col = "allele_diff")
+
+
+```
+
+
+The variance of the 0.25 and 0.75 peaks is exagerated because the peaks right now are in -0.5 and 0.5. But they are the same peak. The most reasonable way to equate eveything is to take the absolute value of said peaks and the estimate the variance. The mean is expected to be close to 0 so that is ok. 
+
+```{r}
+mean(abs(all_props_QC[all_props_QC$biallelic_state == 2,c("allele_diff")]))
+var(abs(all_props_QC[all_props_QC$biallelic_state == 2,c("allele_diff")]))
+sd(abs(all_props_QC[all_props_QC$biallelic_state == 2,c("allele_diff")]))
+```
+
+The variance of the peaks is similar.... at least for this simulation. To be sure how to model all of this crap i would have to run many simulations with varying degrees of:
+
+- mean read depth
+- minimum allele depth / maximum too?
+- proportion of 0.5/0.5 to 0.25/0.75 sites
+- number of sampled sites. 
+
+Then i need to know the mean and variance of each peak. Good god. 
+
+
+## Normality of these peaks
+
+Important question before getting into modelling with normal shit. 
+
+```{r}
+outer_peaks <- abs(all_props_QC[all_props_QC$biallelic_state == 2,c("allele_diff")])
+
+ggplot(as.data.frame(outer_peaks), aes(x = outer_peaks)) +
+  geom_histogram(alpha = 0.5, fill = "blue", binwidth = 0.01) +  # Adjust bins as needed
+  labs(title = "Distribution of Two Columns", x = "biallelic_frequency") +
+  xlim(0,1) + 
+  stat_function(fun = function(x) dnorm(x,mean = 0.5, sd = sd(outer_peaks))*30)
+
+```
+
+```{r}
+library(MASS)
+fit <- fitdistr(outer_peaks, "normal")
+fit$estimate
+
+```
+
+```{r}
+ggplot(as.data.frame(outer_peaks), aes(sample = outer_peaks)) +
+  stat_qq()+
+  stat_qq_line()
+
+```
+
+
+```{r}
+shapiro.test(outer_peaks)
+```
+
+
+Veo que una distribucion normal medio no es del todo adecuada. Y tengo una idea para ajustar todo:
+
+- Crear una distribucion discreta de la distribucion de posibles proporciones alelicas que se pueden obtener, ponderada por la frequencia de profundidad de secuenciacion. 
+- Cambiar de distribucion exponencial a geometrica?
+- Multiplicar esa distribucion discreta por la normal que ya he definido mas adelante. Con esas 2 cosas el fit debe ser casi que identico...
+
+
+Otra opcion es ignorar este hecho y apuntar a buscar una medida que simplemente me mida el ajuste del modelo a los datos, una diferencia consistente y buena entre modelos es lo unico que busco en este caso. 
+
+# Fitting of distributions to data
+
+Here i can define a specific distribution. In this test i'm simulating a tetraploid case. I assume that the variance of each allele frequency peak is the same. 
+
+
+```{r}
+# Define individual normal distributions (replace with your estimated means and variances)
+left_normal <- function(x) { dnorm(x, mean = -0.5, sd = 0.14) }
+central_normal <- function(x) { dnorm(x, mean = 0, sd = 0.14) }
+right_normal <- function(x) { dnorm(x, mean = 0.5, sd = 0.14) }
+
+# Define mixing proportions (replace with estimated values, they sum to 1)
+central_prop <- 0.4  # Proportion for central_normal
+out_ward_prop <- (1-central_prop)/2  # Proportion for left_normal and right_normal
+
+
+# Mixture density function
+mixture_density <- function(x) {
+  out_ward_prop * left_normal(x) + central_prop * central_normal(x) + out_ward_prop * right_normal(x)
+}
+
+
+
+```
+
+
+Sample from this mixture density distribution
+
+
+```{r}
+
+xrange <- 1 # function range from 0 (implicit) to x
+N <- 10000 # number of samples
+#b <- -2.16
+#mx <- 35.48
+#sigma <-  147.17
+
+xy <- data.frame(proposed = runif(N, min = -1, max = xrange))
+
+xy$fit <- mixture_density(x = xy$proposed)
+
+xy$random <- runif(N, min = 0, max = 1)
+
+maxDens <- max(xy$fit)
+
+xy$accepted <- with(xy, random <= fit/maxDens)
+# retain only those values which are "below" the custom distribution
+xy <- xy[xy$accepted, ]
+
+hist(xy$proposed, freq = FALSE, breaks = 100, col = "light grey")
+# multiply by 130 to make it look fit nicely
+curve(mixture_density(x)/(maxDens * 1),
+      from = -1, to = 1, add = TRUE, col = "red", lwd = 2)
+```
+
+Quiero ver la diferencia entre la varianza estimada de la distribucion completa y la varianza estimada de la distribucion sampleada
+
+```{r}
+mean(xy$proposed)
+var(xy$proposed)
+```
+
+
 
 
 
@@ -109,19 +322,50 @@ library(ggplot2)
 complete_freqs <- c(all_props_QC$allele_prop_a,all_props_QC$allele_prop_b) 
 
 ggplot(as.data.frame(complete_freqs), aes(x = complete_freqs)) +
-  geom_histogram(alpha = 0.5, fill = "blue", binwidth = 0.001) +  # Adjust bins as needed
+  geom_histogram(alpha = 0.5, fill = "blue", binwidth = 0.01) +  # Adjust bins as needed
   labs(title = "Distribution of Two Columns", x = "biallelic_frequency") +
-  xlim(0,1)
+  xlim(0,1) + 
+  stat_function(fun = function(x) mixture_density(x)* 100)
 ```
+
+
+# fitting test
+
+```{r}
+
+# Define individual normal distributions (replace with your estimated means and variances)
+left_normal <- function(x,sdev) { dnorm(x, mean = -0.5, sd = sdev) }
+central_normal <- function(x,sdev) { dnorm(x, mean = 0, sd = sdev) }
+right_normal <- function(x,sdev) { dnorm(x, mean = 0.5, sd = sdev) }
+
+# Define mixing proportions (replace with estimated values, they sum to 1)
+central_prop <- 0.4  # Proportion for central_normal
+out_ward_prop <- (1-central_prop)/2  # Proportion for left_normal and right_normal
+
+
+# Mixture density function
+mixture_density <- function(x,sdev,central_prop) {
+  (1-central_prop)/2 * left_normal(x,sdev) + central_prop * central_normal(x,sdev) + (1-central_prop)/2 * right_normal(x,sdev)
+}
+
+
+library(MASS)
+fit <- fitdistr(complete_freq_diff, mixture_density, list(sdev=0.1,central_prop=0.3))
+fit$estimate
+
+```
+
 
 
 
 ```{r}
 library(ggplot2)
 
-ggplot(all_props_QC, aes(x = allele_prop_a)) +
+
+ggplot(as.data.frame(complete_freq_diff), aes(x = complete_freq_diff)) +
   geom_histogram(alpha = 0.5, fill = "blue", binwidth = 0.01) +  # Adjust bins as needed
-  geom_histogram(data = all_props_QC, aes(x = allele_prop_b), alpha = 0.5, fill = "red", binwidth = 0.01) +
-  labs(title = "Distribution of Two Columns", x = "Values")
+  labs(title = "Distribution of Two Columns", x = "biallelic_frequency") +
+  xlim(-1,1) + 
+  stat_function(fun = function(x) mixture_density(x, 0.1423479,0.4250079)* 60)
 ```
 
