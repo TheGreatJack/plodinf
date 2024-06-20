@@ -8,7 +8,7 @@ output: html_document
 
 # Simulation of read_allele_proportions
 
-This simulator allows me to simulate different ploidies, from 2 to 4 n. This simulator sort of reallistically simulated data sampled from rad-seq data
+#This simulator allows me to simulate different ploidies, from 2 to 4 n. This simulator sort of reallistically simulated data sampled from rad-seq data
 
 
 ## Function definition
