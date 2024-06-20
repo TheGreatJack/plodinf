@@ -7,6 +7,8 @@ threads=4
 output_dir='mitnanex_results/'
 wd="./"
 minimum_coverage="10"
+mapping_quality=20
+base_quality=30
 
 ## Help message
 plodinf_help() {
@@ -114,7 +116,7 @@ create_wd(){
 
 get_snp_count (){
     ## Get the read count for each SNP
-    bcftools mpileup -Q 20 -q 30 --skip-all-unset 3 -a "FORMAT/AD" -Ou --no-reference $input_file 
+    bcftools mpileup -Q $mapping_quality -q $base_quality --skip-all-unset 3 -a "FORMAT/AD" -Ou --no-reference $input_file 
 }
 
 filter_snp(){
