@@ -8,7 +8,7 @@ output: html_document
 
 # Simulation of read_allele_proportions
 
-#This simulator allows me to simulate different ploidies, from 2 to 4 n. This simulator sort of reallistically simulated data sampled from rad-seq data
+This simulator allows me to simulate different ploidies, from 2 to 4 n. This simulator sort of reallistically simulated data sampled from rad-seq data
 
 
 ## Function definition
@@ -366,6 +366,94 @@ ggplot(as.data.frame(complete_freq_diff), aes(x = complete_freq_diff)) +
   geom_histogram(alpha = 0.5, fill = "blue", binwidth = 0.01) +  # Adjust bins as needed
   labs(title = "Distribution of Two Columns", x = "biallelic_frequency") +
   xlim(-1,1) + 
-  stat_function(fun = function(x) mixture_density(x, 0.1423479,0.4250079)* 60)
+  stat_function(fun = function(x) mixture_density(x, 0.1451268,0.4118683)* 60)
 ```
+# ks test testing
+
+First generate a fit for a single normal corresponding to the diploid scenario
+
+```{r}
+diploid_fit <- fitdistr(complete_freq_diff, "normal")
+diploid_fit$estimate
+```
+
+
+## Functions to generate custom CDFs
+
+```{r}
+library(dgof)
+
+custom_cdf_3 <- function(val, mixture_density, sdev, central_prop){
+  probs <- c()
+  for (valor in val){
+    prob_val <- integrate(function(x) mixture_density(x,sdev, central_prop), -Inf, valor)$value  
+    probs <- c(probs,prob_val)
+  }
+  
+  return(probs)
+}
+
+ks.test(complete_freq_diff, function(x) custom_cdf_3(x, mixture_density,0.1451268,0.4118683))
+
+```
+
+```{r}
+
+custom_cdf_4 <- function(val, dnorm, mean, sd){
+  probs <- c()
+  for (valor in val){
+    prob_val <- integrate(function(x) dnorm(x,mean, sd), -Inf, valor)$value  
+    probs <- c(probs,prob_val)
+  }
+  
+  return(probs)
+}
+
+ks.test(complete_freq_diff, function(x) custom_cdf_4(x, dnorm,-0.006089245,0.381195036), simulate.p.value = TRUE, B=1000)
+
+```
+
+
+## Fit testing of specific models
+
+```{r}
+#library(dgof)
+
+tetraploid_model <- function(x) custom_cdf_3(x, mixture_density,0.1451268,0.4118683)
+diploid_model <- function(x) custom_cdf_4(x, dnorm,-0.006089245,0.381195036)
+
+```
+
+```{r}
+ks.test(complete_freq_diff, tetraploid_model)
+```
+
+```{r}
+
+ks.test(complete_freq_diff, diploid_model)
+```
+
+
+
+
+There is a differnces in the D estatistic and also in the p value, the tetraploid model fits better.... Next step is to make a ton of simulations and automatic testing of the limits of the use of this approach. To see how robust it is.  The simluation would entail:
+
+
+- mean read depth
+  - 2, 5, 10, 20, 50, 100
+- minimum allele depth / maximum too?
+  - 2, 5, 10, 20
+  - effect on ploidy signals
+- Ploidy
+  - proportion of 0.5/0.5 to 0.25/0.75 sites
+      10 values between 0 to 1. 
+  - Ploidies higher than 4n up to 6 to 8??
+      - Generalization of models and simulations aaaaaa
+- number of sampled sites. 
+      - 100, 1000, 10000, 100000, million
+
+
+PCA idea for ploidy clustering -> just do a PCA on the allele freqs doesnt go beyond that. 
+
+
 
