@@ -8,7 +8,9 @@ output: html_document
 
 # Simulation of read_allele_proportions
 
-This simulator allows me to simulate different ploidies, from 2 to 4 n. This simulator sort of reallistically simulated data sampled from rad-seq data
+This simulator allows me to simulate different ploidies, from 2n to 4n. This simulator sort of realistically simulates data sampled from rad-seq data.
+
+The realism part comes from the simulation of read depth. For RAD-seq a exponential distribution is reasonable. A geometric distribution may be better as read depth is discrete. or rather a natural number set. 
 
 
 ## Function definition
@@ -95,6 +97,18 @@ snp_simulator_big <- function(current_ploidy, mean_depth, n_sites, freqs_prob) {
 
 # QC filtering and plotting
 
+Here i simulate a tetraploid, with a mean depth of 20 (in my data is more like 4 :c). This is to avoid too many sites with 0 depth as that is also a possible number. In theory this allows this simulator to emulate allele drop due to sparse depth. 
+
+10k sites is reasonable for testing. And a empirical ratio of the peak groups. In the tetraploid case you have to groups of peaks:
+
+- 0.5 peak -> These would be big if the fixed differences among the parental genomes are low.
+- 0.25/0.75 peaks -> These would be big if each of the genomes in question have high heterozygosity for some reason. High mutation rate?
+
+The assumptions before only apply for the biallelic case which is by far the most common. Right now i dont have a way to simulate the ratio of these two peaks from the heterozygosity and divergence among parental genomes. So i just force a particular ratio between the peaks. 
+
+In the autopollyploid case.. moost peaks should be 0.25/0.75. Not many intraspecific differences would be fixed that would be rare. 
+
+
 
 ```{r}
 current_ploidy <- 4 # Tetraploid
@@ -143,18 +157,19 @@ ggplot(as.data.frame(complete_freq_diff), aes(x = complete_freq_diff)) +
   labs(title = "Distribution of allele-snp frequencies", x = "biallelic_frequency") +
   xlim(-1,1)
 ```
-Lo que veo es que me separa los picos de las distribuciones mas y corregir por sesgos es relativameente sencillo, el hecho de que pueda ser menor o mayor a cero hace automaticamente que la diferencia entre los picos sea como del doble....., creo que esa es la forma mas adecuada de modelarlo.... No creo que sufra por usar menos datos, la mitad de los datos para ser exactos, pero la vuelta es que esos datos son limitados el uno con el otro... hay una dependencia rara ahí. 
+Lo que veo es que me separa los picos de las distribuciones mas y corregir por sesgos es relativamente sencillo, el hecho de que pueda ser menor o mayor a cero hace automaticamente que la diferencia entre los picos sea como del doble....., creo que esa es la forma mas adecuada de modelarlo.... No creo que sufra por usar menos datos, la mitad de los datos para ser exactos, pero la vuelta es que esos datos son limitados el uno con el otro... hay una dependencia rara ahí. 
 
 
 Ahora me centro en estimar variables o incluso modelar cosas de estos datos simulados, es bueno antes de ponerme a definir los modelos a la loca. Creo que me va tocar hacer luego un monton de simulaciones.... simulaciones validas?
 
-Primero veo el promedio de la distribucion y la varianza de esta diferencia
+Primero veo el promedio de la distribucion y la varianza de esta diferencia y observo estimados rasonables. 
 
 ```{r}
 mean(complete_freq_diff)
 var(complete_freq_diff)
 ```
 
+Luego estimo eso para cada pico
 
 ```{r}
 # Function to calculate mean, variance, and absolute values
@@ -188,7 +203,7 @@ summary_df <- summary_by_group(all_props_QC, group_col = "biallelic_state", valu
 ```
 
 
-The variance of the 0.25 and 0.75 peaks is exagerated because the peaks right now are in -0.5 and 0.5. But they are the same peak. The most reasonable way to equate eveything is to take the absolute value of said peaks and the estimate the variance. The mean is expected to be close to 0 so that is ok. 
+The variance of the 0.25 and 0.75 peaks is exaggerated because the peaks right now are in -0.5 and 0.5. But they are the same peak. The most reasonable way to equalize everything is to take the absolute value of said peaks and the estimate the variance. The mean is expected to be close to 0 so that is OK. 
 
 ```{r}
 mean(abs(all_props_QC[all_props_QC$biallelic_state == 2,c("allele_diff")]))
@@ -208,7 +223,7 @@ Then i need to know the mean and variance of each peak. Good god.
 
 ## Normality of these peaks
 
-Important question before getting into modelling with normal shit. 
+Important question before getting into modelling with normal shit. First y plot the 0.25/0.75 peaks signals and i overlay a normal distribution with expected parameters. Is not quite right. The left hand side of the distr is underestimated and the right hand over estimated. I suspect it has to do with count-freq distribution. There is a skew in the distribution.
 
 ```{r}
 outer_peaks <- abs(all_props_QC[all_props_QC$biallelic_state == 2,c("allele_diff")])
@@ -220,6 +235,8 @@ ggplot(as.data.frame(outer_peaks), aes(x = outer_peaks)) +
   stat_function(fun = function(x) dnorm(x,mean = 0.5, sd = sd(outer_peaks))*30)
 
 ```
+I tested fitting with MASS, it gave the expected for a normal distr not sure what was i thinking. But to note, the mean is underestimated. 
+
 
 ```{r}
 library(MASS)
@@ -228,6 +245,8 @@ fit$estimate
 
 ```
 
+The qqplot confirms that is not quite normal
+
 ```{r}
 ggplot(as.data.frame(outer_peaks), aes(sample = outer_peaks)) +
   stat_qq()+
@@ -235,6 +254,7 @@ ggplot(as.data.frame(outer_peaks), aes(sample = outer_peaks)) +
 
 ```
 
+A shapiro test further confirms that is not quite normal. 
 
 ```{r}
 shapiro.test(outer_peaks)
@@ -310,6 +330,7 @@ Quiero ver la diferencia entre la varianza estimada de la distribucion completa 
 ```{r}
 mean(xy$proposed)
 var(xy$proposed)
+sd(xy$proposed)
 ```
 
 
@@ -319,17 +340,21 @@ var(xy$proposed)
 ```{r}
 library(ggplot2)
 
-complete_freqs <- c(all_props_QC$allele_prop_a,all_props_QC$allele_prop_b) 
+#complete_freqs_diff <- c(all_props_QC$allele_prop_a-all_props_QC$allele_prop_b)
 
-ggplot(as.data.frame(complete_freqs), aes(x = complete_freqs)) +
+#complete_freq_diff
+
+ggplot(as.data.frame(complete_freq_diff), aes(x = complete_freq_diff)) +
   geom_histogram(alpha = 0.5, fill = "blue", binwidth = 0.01) +  # Adjust bins as needed
   labs(title = "Distribution of Two Columns", x = "biallelic_frequency") +
-  xlim(0,1) + 
-  stat_function(fun = function(x) mixture_density(x)* 100)
+  xlim(-1,1) + 
+  stat_function(fun = function(x) mixture_density(x)*60)
 ```
 
 
-# fitting test
+## fitting test
+
+Fitting my own custom distribution to the distribution of allele differences. 
 
 ```{r}
 
@@ -356,7 +381,7 @@ fit$estimate
 ```
 
 
-
+I redo the overlay graph to check if with the fitted parameters the fit is better and the change is barely noticeable
 
 ```{r}
 library(ggplot2)
@@ -378,7 +403,15 @@ diploid_fit$estimate
 ```
 
 
+
+
 ## Functions to generate custom CDFs
+
+In order to use the ks.test i need to create not only the probability density function but the cumulative distribution function too, which is done by integrating. The CDF is an integral. 
+
+custom_cdf_3 is the CDF of my custom distr. I fit that shit and i see that the D value is 0.039.
+
+
 
 ```{r}
 library(dgof)
@@ -396,6 +429,8 @@ custom_cdf_3 <- function(val, mixture_density, sdev, central_prop){
 ks.test(complete_freq_diff, function(x) custom_cdf_3(x, mixture_density,0.1451268,0.4118683))
 
 ```
+
+custom_cdf_4 is the CDF of a normal distribution distr. I fit that shit and i see that the D value is 0.071. A higher value indicates higher error. So my custom distribution fits better.
 
 ```{r}
 
@@ -455,5 +490,40 @@ There is a differnces in the D estatistic and also in the p value, the tetraploi
 
 PCA idea for ploidy clustering -> just do a PCA on the allele freqs doesnt go beyond that. 
 
+
+
+# MAE fit testing
+
+Here i define a function to estimate mean absolute error from the data
+
+```{r}
+
+```
+
+
+
+# Towards a precise PDF of bialleic data
+
+After thinking for a while the final distribution of the simulated PDF is a sum of discrete PMFs, each PMF is defined by a depth value which is defined by the geometric distribution and by the proportion of peaks, and by the likelihoods of the peaks themselves. 
+
+
+1- First estimate the depth distribution
+2. For each depth separate the frequency of peak type by the proportion of peaks that is defined as a parameter in the distribution. 
+3. For each peak type, estimate the PMF of the possible observed frequency values that are defined by the read depth. Ignore frequencies of 0 and 1. The estimation is a linear interpolation, that is easily solved in a system of equations. Each PMF is a proper PMF
+4. Sum all of the PMFs, and ponder each sum multyplying by the frequency associated to each PDF. 
+5. Normalize the sum of PMFs so that it becomes a proper PMF. 
+
+That should be the final distribution of biallelic frequencies. 
+
+The only things needed to define this theorethical distribution are:
+
+- Geometric distribution of depths, or even the empirical distribution
+- Peak proportion, that should be estimated from the data by means of fitting. 
+- ploidy, that defines the types of peaks and the need for a peak proportion. 
+
+
+```{r}
+
+```
 
 

@@ -1,0 +1,113 @@
+---
+title: "count_freq_distributions"
+author: "Andres Florian"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+
+# Function to generate distributions
+
+This function generates the complete count to freq distribution for a given max count
+
+
+```{r}
+generate_count_freq_distr <- function(max_count){
+  counts_vector <- c()
+  values_vector <- c()
+  for (count in c(1:max_count)){
+    discrete_step <- 1/count
+    values <- seq(from = 0 , to = 1 , by = discrete_step)
+    counts_vector <- c(counts_vector, rep(count, count+1))
+    values_vector <- c(values_vector, values)
+  }
+  table <- cbind(counts_vector, values_vector)
+  table <- as.data.frame(table)
+  colnames(table) <- c("counts","freqs")
+  
+  return(table)
+}
+
+test_table <- generate_count_freq_distr(100)
+```
+
+I plot how that look. It sort of reminds me of a horshecrab for some reason
+
+```{r fig.height = 6, fig.width = 10}
+library(ggplot2)
+
+ggplot(data = test_table, aes(x=counts, y=freqs)) +
+  geom_point()
+
+```
+
+Now i plot the histogram and it clearly shows the problems. 
+
+```{r fig.height = 6, fig.width = 10}
+library(ggplot2)
+
+ggplot(data = test_table, aes(x=freqs)) +
+  geom_histogram(binwidth = 0.001)
+
+```
+
+You would expect that this distribution should be uniform but there is a bias a restriction on the possible values of frequency that a given ammount of sampling allows. Which is annoying if you work with frequencies of low counts. 
+
+Now i use a more empirical approach to distribution which is clearly discrete, not continuous in any sense. 
+
+```{r}
+test_table_freqs <- as.data.frame(table(test_table$freqs))
+test_table_freqs <- test_table[rev(order(test_table$Freq)),]
+```
+
+First i plot the distribution of the counts of each possible value of frequency. In a continuous ideal world each value would have a frequency of 1. In a discrite uniform the frequency should not vary to far from a single value.
+
+
+
+```{r}
+ggplot(data = test_table, aes(x=Freq)) +
+  geom_histogram(binwidth = 1)
+```
+
+# Ways to correct for this bias
+
+
+## Correcting towards a discrete uniform
+
+The idea is simple. A discrete uniform has a very simple PMF/PDF is 1/n. is basically the probability of each value. So with that expectation and with the actual probabilities i should be able to estimate how biased are particular values in the empirical distribution. 
+
+I see a potential problem but the problem i guess is inevitable. The reason for the bias is constrain, not a bad estimation per se. Nearby values to greatly biased values are just not possible to obtain, they would have been possible to obtain if the constrains weren't there. But assigning ghost frequencies to nearby values seems to sketchy and hard to make consistent
+
+
+First i estimate the PMF estimation for each value. Which is 1 over the total number of freqs
+
+```{r}
+uniform_PMF <-  1/length(test_table$freqs)
+```
+
+Next i estimate the empirical PMF
+
+```{r}
+test_table_freqs$emp_PMF <- test_table_freqs$Freq/length(test_table$freqs)
+```
+
+Now i simply dividethe empirical PMF over the expected PMF. And... i found out that it is identical to the frequency counts themselves. 
+
+
+```{r}
+test_table_freqs$norm_diff <- (test_table_freqs$emp_PMF)/uniform_PMF
+```
+
+
+I could divide the counts by themselves and 
+
+# Tests
+```{r}
+cumsum(rep(0.25,4))
+```
+
+
+```{r}
+
+```
+
