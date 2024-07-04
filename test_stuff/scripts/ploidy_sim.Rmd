@@ -612,3 +612,282 @@ x <- 4
 nearest_prob_distance(seq(1/x,(x-1)/x,1/x),c(0.25,0.75))
 ```
 
+
+## PMFs probs testing
+
+
+I have the problem of assigning probabilities to frequencies that are dependent on subyacent probabilities/frequencies. The idea is that frequencies closer to the subyacent probabilities are going to be more likely to be observed. But because of randomness the "far away" frequencies are bound to be found still. Here i will test empirically the limit tendency of these probabilities. 
+
+
+```{r}
+
+
+prob_limit_tester <- function(frequencies,probabilities, sampling_depth, iterations, estimate_every){
+  
+  
+  sampled_freqs <- c()
+  prob_data <- data.frame()
+  for (i in c(1:iterations)){
+    # Sample alleles based on frequencies
+    alleles <- sample(c("A", "B"), size = sampling_depth, prob = probabilities, replace = TRUE)
+    
+    alleles_a <- sum(alleles == "A")
+    alleles_b <- sum(alleles == "B")
+    
+    # Estimate allele proportions
+    prop_a <- alleles_a / sampling_depth
+    prop_b <- alleles_b / sampling_depth
+    
+    #print("Sampled_freqs: ----->")
+    #print(c(prop_a,prop_b))
+    if (!any(c(prop_a,prop_b) %in% c(0,1))){
+      sampled_freqs <- c(sampled_freqs,prop_a,prop_b)
+    }
+
+  }
+  for (i in seq(1,iterations,estimate_every)){
+    row_data <- iteration_freq_estimator(frequencies, sampled_freqs[1:i], i)
+    #print("Final_row_data: ----->")
+    #print(row_data)
+    prob_data <- rbind(prob_data, row_data)
+  }
+  
+  freq_names <- fraction_strings_gen(sampling_depth)
+  #colnames(prob_data) <- c("iterations",as.character(round(frequencies,digits = 5)))
+  colnames(prob_data) <- c("iterations",freq_names)
+  return(prob_data)
+}
+
+
+iteration_freq_estimator <- function(frequencies, sampled_freqs, iteration){
+  data_frame <- as.data.frame(table(sampled_freqs))
+  row_data <- c(iteration)
+  #print("Intial_row_data:")
+  #print(row_data)
+  for (freq in frequencies){
+    #print("Analized freq:")
+    #print(freq)
+    if (freq %in% data_frame$sampled_freqs) {
+      #print("Freq found")
+      freq_frequency <- data_frame[data_frame$sampled_freqs == freq, c("Freq")] / length(sampled_freqs)
+      row_data <- c(row_data,freq_frequency)
+    }else{
+      row_data <- c(row_data,0)
+    }
+    #print(row_data)
+    #print(freq)
+  }
+  return(row_data)
+}
+
+
+
+fraction_strings_gen <- function(denominator){
+  # Define denominator (fixed)
+  #denominator <- 10  # You can change this value
+
+  # Generate sequence of numerators (1 to denominator-1)
+  numerators <- seq(from = 1, to = denominator - 1)
+  
+  # Create fractions as strings
+  fractions <- paste0(numerators, "/", denominator)
+  
+  # Print the sequence of fractions
+  #cat("Sequence of fractions:", fractions, sep = ", ")
+  return(fractions)
+}
+
+
+
+```
+
+
+
+```{r}
+probabilities <- c(0.25,0.5)
+sampling_depth <- 4
+iterations <- 10000
+
+frequencies <- seq(1/sampling_depth,(sampling_depth-1)/sampling_depth,1/sampling_depth)
+estimate_every <- 10
+
+
+test_probs_frame <- prob_data_frame <- prob_limit_tester(frequencies,probabilities, sampling_depth, iterations,estimate_every)
+```
+
+
+
+```{r}
+library(tidyr)  # Load tidyr package for data reshaping
+library(ggplot2)
+
+# Assuming your dataframe is called 'data'
+data_long <- test_probs_frame %>%  # Pipe data frame
+  pivot_longer(cols = names(test_probs_frame)[-1],names_to = "Restricted_frequencies")  # Reshape to long format, exclude first column
+
+ggplot(data_long, aes(x = iterations, y = value, color = Restricted_frequencies)) +  # Set aesthetics
+  geom_line() +  # Add line geom
+  labs(title = "Probability_convergence", x = "Iterations", y = "Empirical_prob")  # Add labels
+
+```
+
+```{r}
+
+dbinom(seq(0,5,1),size = 5, prob = 0.25)
+```
+
+# Binomial modelling of biallelic data
+
+
+For a given depth i can estimate the distribution of probabilities of the frequencies, in the end the proccess is binomial. I can model the probablity of the number of reads sampled from an allele, given the frequency of the allele. I can then assign to the frequencies a probability of being observed. Is quite fast
+
+```{r}
+
+restricted_freq_distr <- function(read_depth, peak_probs){
+  reads_a <- seq(0,read_depth,1)
+  reads_b <- seq(read_depth,0,-1)
+  
+  # Strong future optimization of this double binom estimation 
+  read_binom_probs_a <- dbinom(reads_a,size = read_depth, prob = peak_probs[1])
+  read_binom_probs_b <- dbinom(reads_a,size = read_depth, prob = peak_probs[2])
+  
+  final_freqs <- (reads_a - reads_b) / read_depth
+  
+  final_freqs_probs <- ( read_binom_probs_a + read_binom_probs_b ) / 2
+  
+  final_df <- data.frame(freqs = final_freqs, probs = final_freqs_probs)
+  
+  return(final_df)
+  
+}
+
+```
+
+Doing some testing and plotting i see that this actually creates something useful and it seems it does. 
+```{r}
+read_depth <- 10
+peak_probs <- c(0.25,0.75) 
+
+test_df_binom <- restricted_freq_distr(read_depth, peak_probs)
+
+# Plot the distributions
+ggplot(test_df_binom, aes(x = freqs, y = probs)) +
+  geom_point() +  # Line for first distribution  
+  labs(title = "Binomial Distributions", 
+       x = "Number of Successes", 
+       y = "Probability") +
+  xlim(-1,1) + 
+  ylim(0,0.5) +
+  #scale_x_continuous(breaks = seq(0, max(c(n1, n2)), 5)) +  # Adjust x-axis breaks for clarity
+  theme_bw()  # Use black and white theme
+
+```
+
+At this point i see that to compute the complete PMF for a given read depth distr, and a given ratio of peaks (ploidy dependent). The easiest way would be to compute first a table of probabilities for a range of read depths and from that table you compute the final PMF. The ratio of peaks makes it necessary to recompute the final PMF if you are going to fit the distr to estimate that particular parameter. The other parameters are given by the read depth distr. The peak frequencies are fixed.
+
+Also i need to ignore the 0 read depth and complete read depth values as those are not particularly useful. 
+
+
+```{r}
+compute_base_probability_table <- function(max_read_depth,peak_probs_list){
+  
+  probability_table <- data.frame()
+  
+  for (read_depth in c(2:max_read_depth)){
+    for (peak_prob_name in names(peak_probs_list)){
+      data_r <-restricted_freq_distr_viable(read_depth, peak_probs_list[[peak_prob_name]])
+      data_r$peak_type <- peak_prob_name
+      data_r$read_depth <- read_depth
+      probability_table <- rbind(probability_table, data_r)
+    }
+  }
+  return(probability_table)
+}
+
+
+
+restricted_freq_distr_viable <- function(read_depth, peak_probs){
+  reads_a <- seq(1,read_depth-1,1)
+  reads_b <- seq(read_depth-1,1,-1)
+  
+  # Strong future optimization of this double binom estimation 
+  read_binom_probs_a <- dbinom(reads_a,size = read_depth, prob = peak_probs[1])
+  read_binom_probs_b <- dbinom(reads_a,size = read_depth, prob = peak_probs[2])
+  
+  final_freqs <- (reads_a - reads_b) / read_depth
+  
+  final_freqs_probs <- (read_binom_probs_a + read_binom_probs_b ) / (2*sum(read_binom_probs_a))
+  
+  final_df <- data.frame(freqs = final_freqs, probs = final_freqs_probs)
+  
+  return(final_df)
+  
+}
+
+compute_pmf_probs <- function(base_prob_table, read_depth_distr, peak_ratio){
+  read_depth_table <- as.data.frame(table(read_depth_distr))
+  
+  for (read_depth in read_depth_table$read_depth_distr){
+    # fitler base for a given read depth and get the average for each frequency, then ponder each average for the adjusted to peak ratio read depth fuck me, then return a table and then create another function that would bother with returning probabilities given a value, fuck. Then test the fitting with MASs 
+  }
+}
+```
+
+
+```{r}
+max_read_depth <- 500
+peak_probs_list <- list("0.25_0.75"= c(0.25,0.75),"0.5_0.5" = c(0.5,0.5))
+
+base_probability_test <- compute_base_probability_table(max_read_depth,peak_probs_list)
+```
+
+
+
+## Testing reciprocal binomial distr
+
+```{r}
+library(ggplot2)
+
+# Define parameters for the distributions
+n1 <- 6  # Number of trials for first distribution
+p1 <- 0.25  # Probability of success for first distribution
+n2 <- 6  # Number of trials for second distribution
+p2 <- 0.75  # Probability of success for second distribution
+
+# Generate data for distributions
+x <- 0:max(c(n1, n2))  # Range of possible outcomes (0 to max trials)
+binom_data1 <- dbinom(x, size = n1, prob = p1)  # Probability for each outcome (distribution 1)
+binom_data2 <- dbinom(x, size = n2, prob = p2)  # Probability for each outcome (distribution 2)
+
+# Create data frame
+data <- data.frame(x = x, 
+                   Binomial_n1 = binom_data1, 
+                   Binomial_n2 = binom_data2)
+
+
+# Assuming your dataframe is called 'data'
+data_long <- data %>%  # Pipe data frame
+  pivot_longer(cols = names(data)[-1],names_to = "binom")  # Reshape to long format, exclude first column
+
+# Plot the distributions
+ggplot(data_long, aes(x = x, y = value, color = binom)) +
+  geom_line() +  # Line for first distribution  
+  labs(title = "Binomial Distributions", 
+       x = "Number of Successes", 
+       y = "Probability") +
+  scale_x_continuous(breaks = seq(0, max(c(n1, n2)), 5)) +  # Adjust x-axis breaks for clarity
+  theme_bw()  # Use black and white theme
+
+# Add legend
+guides(color =  guide_legend(title = "Distribution"))
+
+```
+
+
+
+
+## Random thought
+
+Given a number of snps at a particular depth i can use the binomial to estimate the probability of getting an observed fixed. SNP alleles were all of the reads were from only one allele, masking its "SNP identity". This would be a sort of allele dropout. An estimation of how many sites were not corrrectly sampled. 
+
+Not sure if that number can be used to estimate something more useful for population genetics. Is an interesting fact i guess. 
