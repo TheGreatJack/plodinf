@@ -19,7 +19,7 @@ The realism part comes from the simulation of read depth. For RAD-seq a exponent
 # Function to simulate allele proportions for a single SNP
 simulate_snp <- function(mean_depth, n_sites, ploidy, biallelic_freqs,freqs_prob) {
   # Sample read depth from exponential distribution
-  read_depth <- round(rexp(1, rate = 1/mean_depth), 0)
+  read_depth <- ceiling(rexp(1, rate = 1/mean_depth))
   
   # Sample biallelic frequency state based on ploidy
   biallelic_state <- sample(1:length(biallelic_freqs), size = 1, prob = freqs_prob)
@@ -112,7 +112,7 @@ In the autopollyploid case.. moost peaks should be 0.25/0.75. Not many intraspec
 
 ```{r}
 current_ploidy <- 4 # Tetraploid
-mean_depth <- 20 # profundidad promedio?
+mean_depth <- 10 # profundidad promedio?
 n_sites <- 10000
 freqs_prob <- c(0.3,0.7) # 2 numeros que sumen 1 en tetraploides, de resto 1. el primer numero corresponde a prporcion 0.5/0.5
 
@@ -133,7 +133,7 @@ library(ggplot2)
 complete_freqs <- c(all_props_QC$allele_prop_a,all_props_QC$allele_prop_b) 
 
 ggplot(as.data.frame(complete_freqs), aes(x = complete_freqs)) +
-  geom_histogram(alpha = 0.5, fill = "blue", binwidth = 0.05) +  # Adjust bins as needed
+  geom_histogram(alpha = 0.5, fill = "blue", binwidth = 0.01) +  # Adjust bins as needed
   labs(title = "Distribution of allele-snp frequencies", x = "biallelic_frequency") +
   xlim(0,1)
 ```
@@ -765,6 +765,8 @@ restricted_freq_distr <- function(read_depth, peak_probs){
 
 Doing some testing and plotting i see that this actually creates something useful and it seems it does. 
 ```{r}
+library(ggplot2)
+
 read_depth <- 10
 peak_probs <- c(0.25,0.75) 
 
@@ -824,12 +826,73 @@ restricted_freq_distr_viable <- function(read_depth, peak_probs){
   
 }
 
-compute_pmf_probs <- function(base_prob_table, read_depth_distr, peak_ratio){
+compute_pmf_probs <- function(base_prob_table, read_depth_distr, central_prop){
   read_depth_table <- as.data.frame(table(read_depth_distr))
   
-  for (read_depth in read_depth_table$read_depth_distr){
-    # fitler base for a given read depth and get the average for each frequency, then ponder each average for the adjusted to peak ratio read depth fuck me, then return a table and then create another function that would bother with returning probabilities given a value, fuck. Then test the fitting with MASs 
+  out_ward_prop <- (1-central_prop)
+  
+  
+  filtered_base_table <- base_prob_table[base_prob_table$read_depth %in% read_depth_table$read_depth_distr,]
+  
+  filtered_base_table[filtered_base_table$peak_type == "0.5_0.5",c("probs")] <- filtered_base_table[filtered_base_table$peak_type == "0.5_0.5",c("probs")] * central_prop
+
+  filtered_base_table[filtered_base_table$peak_type == "0.25_0.75",c("probs")] <- filtered_base_table[filtered_base_table$peak_type == "0.25_0.75",c("probs")] * out_ward_prop
+  
+  final_weights <- aggregate(probs ~ freqs, filtered_base_table, FUN = sum)
+  
+  # I rest 1 at the end because read depths of 1 get ignored.....
+  final_weights$probs <- final_weights$probs / (length(read_depth_table$read_depth_distr) - 1)
+  
+  return(final_weights)
+}
+
+simple_pmf_function <- function(x, final_pmf_weights){
+  if (x %in% final_pmf_weights$freqs){
+    return(final_pmf_weights[final_pmf_weights$freqs == x, c("probs")])
+  }else{
+    return(0)
   }
+}
+
+simple_cdf_func <- function(x,weights) {
+  # Check if weights is a data frame with columns 'freqs' and 'probs'
+  if (!all(c("freqs", "probs") %in% names(weights))) {
+    stop("weights must be a data frame with columns 'freqs' and 'probs'")
+  }
+  
+  # Sort weights by 'freqs' in ascending order
+  weights <- weights[order(weights$freqs), ]
+
+  
+  cdf_probs <-c()
+  
+  for (val in x){
+    #print(val)
+    # Initialize cumulative probability
+    cdf <- 0
+    # Loop through weights and calculate cumulative sum
+    for (i in 1:nrow(weights)) {
+      if (weights$freqs[i] <= val) {
+        cdf <- cdf + weights$probs[i]
+      } else {
+        cdf_probs <- c(cdf_probs,cdf)
+        break  # Stop iterating when freqs exceed x
+      }
+    }
+    #print("Precheck")
+    #print(weights$freqs[-1])
+    if (val >= tail(weights$freqs,n=1)){
+      cdf_probs <- c(cdf_probs,1)       
+    }
+  }
+  return(cdf_probs)
+}
+
+```
+
+```{r}
+for (x in 1000){
+  print(x)
 }
 ```
 
@@ -840,6 +903,144 @@ peak_probs_list <- list("0.25_0.75"= c(0.25,0.75),"0.5_0.5" = c(0.5,0.5))
 
 base_probability_test <- compute_base_probability_table(max_read_depth,peak_probs_list)
 ```
+
+
+```{r}
+
+read_depth_distr <- ceiling(rexp(1000,1/4))
+central_prop <- 0.3
+
+final_pmf_weights_test <- compute_pmf_probs(base_probability_test, read_depth_distr, central_prop)
+sum(final_pmf_weights_test$probs)
+```
+
+```{r}
+read_depth_distr <- ceiling(rexp(1000,1/4))
+#read_depth_distr <- round(rnorm(1000,30,2))
+central_prop <- 0.3
+
+final_pmf_weights_test <- compute_pmf_probs(base_probability_test, read_depth_distr, central_prop)
+
+
+library(ggplot2)
+
+# Plot the distributions
+ggplot(final_pmf_weights_test, aes(x = freqs, y = probs)) +
+  geom_point() +  # Line for first distribution  
+  labs(title = "Binomial Distributions", 
+       x = "Number of Successes", 
+       y = "Probability") + 
+  xlim(-1,1) +
+  ylim(0,0.3)
+```
+
+```{r}
+simple_pmf_function(0.5,final_pmf_weights_test)
+```
+
+```{r}
+simple_cdf_func(c(1,1,1,1),final_pmf_weights_test)
+```
+
+## Fast fitting test
+
+
+Here i check if everything i modelled is even useful to test the fit with a discrete ks.test. First i use the simulator i defined before. 
+
+- Mean depth of 10
+- 0.3 of proportion of central peak
+- about 10k sites ~ 2.5 k after filtering
+- filter of minimum allele depth
+
+```{r}
+current_ploidy <- 4 # Tetraploid
+mean_depth <- 10 # profundidad promedio?
+n_sites <- 10000
+freqs_prob <- c(0.3,0.7) # 2 numeros que sumen 1 en tetraploides, de resto 1. el primer numero corresponde a prporcion 0.5/0.5
+
+
+all_props <- snp_simulator_big(current_ploidy, mean_depth, n_sites, freqs_prob)
+
+minimum_allele_depth <- 2
+
+all_props_QC <-all_props[all_props$allele_a_reads >= minimum_allele_depth & all_props$allele_b_reads >= minimum_allele_depth,]
+
+
+# Conversion a diff distr
+n <- 10
+
+for (i in c(1:n)) {
+  inversion_vector <- sample(c(-1,1), size = length(all_props_QC$allele_diff),replace = TRUE)
+  all_props_QC$allele_diff <- all_props_QC$allele_diff * inversion_vector
+}
+
+complete_freq_diff <- all_props_QC$allele_diff
+
+
+```
+
+Now i define the CDF of what it should be the theoretical distribution of the data i simulated. It should fit really well if not is either a problem with dgof ks.test or i'm hillariously wrong. I will use the same parameters as the simulated data.
+
+
+```{r}
+
+read_depth_distr <- ceiling(rexp(5594,1/mean_depth))
+central_prop <- 0.3
+
+final_pmf_weights_test <- compute_pmf_probs(base_probability_test, read_depth_distr, central_prop)
+sum(final_pmf_weights_test$probs)
+
+```
+
+
+Now the ks.test
+
+
+```{r}
+
+library(dgof)
+
+
+
+alternative_cdf_func <- stepfun(final_pmf_weights_test$freqs, c(0,final_pmf_weights_test$probs))
+
+dgof::ks.test(complete_freq_diff, function(x) simple_cdf_func(x, final_pmf_weights_test))
+
+dgof::ks.test(complete_freq_diff, function(x) alternative_cdf_func(x))
+
+```
+
+It doesnt quite work for some reason..... i think the test is flawed :v. To prove that i will plot the model PMF and the empirical pmf and check how closely it fits
+
+
+```{r}
+empiriical_pmf <- as.data.frame(table(complete_freq_diff))
+empiriical_pmf$probs <- empiriical_pmf$Freq / (sum(empiriical_pmf$Freq) - 100)
+
+empiriical_pmf$complete_freq_diff <- as.numeric(as.character(empiriical_pmf$complete_freq_diff))#sapply(empiriical_pmf$complete_freq_diff, as.numeric)
+```
+
+
+```{r}
+ggplot()+
+  geom_point(data=final_pmf_weights_test,aes(x = freqs, y = probs, color = "red")) +
+  geom_point(data=empiriical_pmf, aes(x = complete_freq_diff, y = probs, color="blue")) +
+  labs(title = "Binomial Distributions", 
+       x = "Number of Successes", 
+       y = "Probability") + 
+  xlim(-1,1) +
+  ylim(0,0.1)
+```
+
+
+
+```{r}
+length(complete_freq_diff[complete_freq_diff %in% final_pmf_weights_test$freqs]) / length(complete_freq_diff)
+```
+
+The simulated and the "theoretical distr in this case dont share the same exact read depth distribution. They just share about half of the allele frequency values. Which makes the probability estimations from both too different. I just need to force the same read depth distr which is easy in simulation and in practice. From this i see that this distribution is really sensitive to the underlying read depth distr, which is expected.
+
+To test the fit a chi square test seems appropriate, remembering that the observed data must be the observed number of reads for each proportion, so that is an integer. Te expected would be the multiplication of the PMF and twice or once the total number of reads. The expected can be made out of decimals, the observed no. With that i can test the fit. 
 
 
 
@@ -866,7 +1067,19 @@ data <- data.frame(x = x,
 
 
 # Assuming your dataframe is called 'data'
-data_long <- data %>%  # Pipe data frame
+data_long <- data %>%  # Pipe dlibrary(dgof)
+
+custom_cdf_3 <- function(val, mixture_density, sdev, central_prop){
+  probs <- c()
+  for (valor in val){
+    prob_val <- integrate(function(x) mixture_density(x,sdev, central_prop), -Inf, valor)$value  
+    probs <- c(probs,prob_val)
+  }
+  
+  return(probs)
+}
+
+ks.test(complete_freq_diff, function(x) custom_cdf_3(x, mixture_density,0.1451268,0.4118683))ata frame
   pivot_longer(cols = names(data)[-1],names_to = "binom")  # Reshape to long format, exclude first column
 
 # Plot the distributions
