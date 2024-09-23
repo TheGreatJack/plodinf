@@ -763,12 +763,15 @@ restricted_freq_distr <- function(read_depth, peak_probs){
 
 ```
 
+
+
+
 Doing some testing and plotting i see that this actually creates something useful and it seems it does. 
 ```{r}
 library(ggplot2)
 
 read_depth <- 10
-peak_probs <- c(0.25,0.75) 
+peak_probs <- c(0.5,0.5) 
 
 test_df_binom <- restricted_freq_distr(read_depth, peak_probs)
 
@@ -939,7 +942,7 @@ simple_pmf_function(0.5,final_pmf_weights_test)
 ```
 
 ```{r}
-simple_cdf_func(c(1,1,1,1),final_pmf_weights_test)
+simple_cdf_func(c(-0.5,0,0.5),final_pmf_weights_test)
 ```
 
 ## Fast fitting test
@@ -1079,7 +1082,7 @@ custom_cdf_3 <- function(val, mixture_density, sdev, central_prop){
   return(probs)
 }
 
-ks.test(complete_freq_diff, function(x) custom_cdf_3(x, mixture_density,0.1451268,0.4118683))ata frame
+ks.test(complete_freq_diff, function(x) custom_cdf_3(x, mixture_density,0.1451268,0.4118683))
   pivot_longer(cols = names(data)[-1],names_to = "binom")  # Reshape to long format, exclude first column
 
 # Plot the distributions

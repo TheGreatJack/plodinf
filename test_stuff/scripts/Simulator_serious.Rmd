@@ -1,0 +1,374 @@
+---
+title: "simulator_plodinf"
+author: "Florian"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+
+Here i would create code to simulate snp proportion distributions for differnt ploidies, sequencing parameters, and some biological cosiderations regarding SNPs. The idea is to be able to run many simulations with varying degrees of:
+
+- ploidy
+- read depth distribution
+- mean read depth
+- mean read error rate
+- minimum allele depth / maximum too?
+- number of SNP sites
+- proportion of 0.5/0.5 to 0.25/0.75 sites
+
+
+General idea:
+
+I need to create a function that would take a read depth distribution. The function per se would be agnostic to the distribution itself. But a discrete exponential or discrete normal or poisson can be expected here. Then given a number of SNP sites to simulate the sites would be assigned to each read depth according to the read depth distribution. 
+
+Now here things vary depending on the ploidy. In ploides 2n and 3n, there is only 1 possibility for biallelic SNPs. From 4n onwards there are multiple possibilities. Given the ploidy a proportion of sites should be allocated to each possibility. This proportion is parameter to simulate. In practice the model should be able to estimate this. 
+
+Then for each read depth and for each possiblity of biallelic SNPs a sampling of the biallelic SNP proportions is made. X reads to one allele and Y reads to the other allele depending on the proportions. 
+
+Errors from sequencing or even mapping can be varied. PCR errors, uncertainty of a basecall or erroneous mapping can cause: Biased allele proportions, SNP sites that are not real. False biallelic SNPs would probably show as sites with a predominant proportion of one allele, the error would have a low proportion. Those are the only sites that would be reasonably easy to model coming from read error rate. Fake biallelic snps would be a function of read depth distr, genome size and mean error rate of reads. 
+
+
+Biased proportions from PCR errors would be difficult to assess in an empirical setting, it would only be seen as higher variance in the biallelic snp distribution. 
+
+Error rate would be ignored from this simulator, as the effects are quite complex to model, in general should be ignorable. 
+
+
+The first step towards this end is:
+
+- Read depth distribution
+
+
+# Read depth distr simulation
+
+I guess poisson is the eassiest rightnow can be a simple poisson distribution. The rate would be defined as the average read depth. This should model ok the nature of read depth distributions. To control for low read depth, 1 or less i first generate the distribution from 2 to up to a max of 200 or so. And the i sample from that. 
+
+
+```{r}
+max_depth <- 200
+average_pois <- 5
+number_of_sites <- 1000
+
+read_depth_pos <- seq(2,max_depth)
+pois_distr <- dpois(read_depth_pos,average_pois)
+
+read_depth_disrt_pois <- sample(read_depth_pos,number_of_sites,replace = TRUE, prob = pois_distr)
+as.data.frame(table(read_depth_disrt_pois))
+
+
+```
+
+On the other hand a exponential is quite good. The poisson has not than high of a range
+
+
+```{r}
+max_depth <- 200
+average_exp <- 4
+number_of_sites <- 1000
+
+read_depth_exp <- seq(2,max_depth)
+exp_distr <- dexp(read_depth_exp,1/average_exp)
+
+
+read_depth_distr_exp <- sample(read_depth_exp,number_of_sites,replace = TRUE, prob = exp_distr)
+read_depth_distr_exp <- ceiling(rexp(number_of_sites,1/average_exp)) + 1
+
+as.data.frame(table(read_depth_distr_exp))
+
+```
+
+
+# Simulator big itself
+
+Take the read depth table, and iterate over each depth using the frequency as the number of snps. If tetraploid sample the number of central sites vs the outer sites using the central prop. Then for each site type (central and outer) and number (denominated as "c"), make "c" samplings of each proportion with the read depth as the sampling size for the sampling, estimate the porportions and save that to a dataframe. 
+
+
+
+```{r}
+snp_simulator_2n_4n <- function(current_ploidy, read_depth_table,central_prop) {
+  
+  
+  # Define biallelic frequencies for different ploidies
+  biallelic_freqs_diploid <- list(c(0.5, 0.5))
+  biallelic_freqs_triploid <- list(c(0.33, 0.66))
+  biallelic_freqs_tetraploid <- list(c(0.5,0.5),c(0.25, 0.75))
+  
+
+  # Get corresponding biallelic frequencies
+  if (current_ploidy == 2) {
+    biallelic_freqs <- biallelic_freqs_diploid
+    all_props <- snp_gen_non_tetraploid(biallelic_freqs, read_depth_table)
+  } else if (current_ploidy == 3) {
+    biallelic_freqs <- biallelic_freqs_triploid
+    all_props <- snp_gen_non_tetraploid(biallelic_freqs, read_depth_table)
+  } else if (current_ploidy == 4){
+    biallelic_freqs <- biallelic_freqs_tetraploid
+    all_props <- snp_gen_tetraploid(biallelic_freqs, read_depth_table,central_prop)
+  }
+  colnames(all_props) <- c("read_depth","reads_a","reads_b","prop_a","prop_b")
+  all_props$prop_diff <- all_props$prop_a - all_props$prop_b
+  return(all_props)
+}
+
+
+snp_gen_non_tetraploid <- function(biallelic_freqs, read_depth_table) {
+  # Initialize empty matrix to store allele proportions
+  #all_props <- matrix(nrow = n_sites, ncol = 5)
+  all_props <- data.frame()
+  
+  # Simulate for each SNP site
+  for (i in 1:nrow(read_depth_table)) {
+    read_depth <- read_depth_table[i,1]
+    read_depth_freq <- read_depth_table[i,2]
+    #print(biallelic_freqs[[1]])
+    
+    for (site in 1:read_depth_freq) {
+      # Sample alleles based on frequencies
+      alleles <- sample(c("A", "B"), size = read_depth, prob = biallelic_freqs[[1]], replace = TRUE)
+      
+      alleles_a <- sum(alleles == "A")
+      alleles_b <- sum(alleles == "B")
+      
+      # Estimate allele proportions
+      prop_a <- alleles_a / read_depth
+      prop_b <- alleles_b / read_depth  
+      
+      all_props <- rbind(all_props,c(read_depth,alleles_a,alleles_b,prop_a, prop_b))
+    }
+  }
+  # Return allele proportions
+  return(all_props)
+}
+
+
+snp_gen_tetraploid <- function(biallelic_freqs, read_depth_table, central_prop) {
+  # Initialize empty matrix to store allele proportions
+  #all_props <- matrix(nrow = n_sites, ncol = 5)
+  
+  out_ward_prop <- (1-central_prop)
+  all_props <- data.frame()
+  
+  # Simulate for each SNP site
+  for (i in 1:nrow(read_depth_table)) {
+    read_depth <- read_depth_table[i,1]
+    read_depth_freq <- read_depth_table[i,2]
+    
+    biallelic_type_tbl <- table(sample(c("c", "o"), size = read_depth_freq, prob = c(central_prop,out_ward_prop), replace = TRUE))
+    
+    read_depth_c <- biallelic_type_tbl["c"]
+    read_depth_o <- biallelic_type_tbl["o"]
+    #print(biallelic_freqs[[1]])
+    
+    if (!is.na(read_depth_c)) {
+      for (site in 1:read_depth_c) {
+        # Sample alleles based on frequencies
+        alleles <- sample(c("A", "B"), size = read_depth, prob = biallelic_freqs[[1]], replace = TRUE)
+        
+        alleles_a <- sum(alleles == "A")
+        alleles_b <- sum(alleles == "B")
+        
+        # Estimate allele proportions
+        prop_a <- alleles_a / read_depth
+        prop_b <- alleles_b / read_depth  
+        
+        all_props <- rbind(all_props,c(read_depth,alleles_a,alleles_b,prop_a, prop_b))
+      }
+    }
+    #print(!is.na(read_depth_o))
+    if (!is.na(read_depth_o)) {
+      for (site in 1:read_depth_o) {
+        # Sample alleles based on frequencies
+        alleles <- sample(c("A", "B"), size = read_depth, prob = biallelic_freqs[[2]], replace = TRUE)
+        
+        alleles_a <- sum(alleles == "A")
+        alleles_b <- sum(alleles == "B")
+        
+        # Estimate allele proportions
+        prop_a <- alleles_a / read_depth
+        prop_b <- alleles_b / read_depth  
+        
+        all_props <- rbind(all_props,c(read_depth,alleles_a,alleles_b,prop_a, prop_b))
+      }
+    }
+  }
+  # Return allele proportions
+  return(all_props)
+}
+
+```
+
+
+## Testing 
+
+
+
+```{r}
+max_depth <- 200
+average_pois <- 5
+number_of_sites <- 1000
+
+read_depth_pos <- seq(2,max_depth)
+pois_distr <- dpois(read_depth_pos,average_pois)
+
+read_depth_disrt_pois <- sample(read_depth_pos,number_of_sites,replace = TRUE, prob = pois_distr)
+#as.data.frame(table(read_depth_disrt_pois))
+
+pois_depth_distr <- as.data.frame(table(read_depth_disrt_pois))
+pois_depth_distr$read_depth_disrt_pois <- as.numeric(as.character(pois_depth_distr$read_depth_disrt_pois))
+pois_depth_distr
+```
+
+
+```{r}
+current_ploidy <- 4
+read_depth_table <- pois_depth_distr
+central_prop <- 0.2
+
+tetraplod_test <- snp_simulator_2n_4n(current_ploidy, read_depth_table,central_prop)
+
+inversion_vector <- sample(c(-1,1), size = length(tetraplod_test$prop_diff),replace = TRUE)
+tetraplod_test$prop_diff <- tetraplod_test$prop_diff * inversion_vector
+
+tetraplod_test_table <- as.data.frame(table(tetraplod_test$prop_diff))
+tetraplod_test_table$Var1 <- as.numeric(as.character(tetraplod_test_table$Var1))
+tetraplod_test_table$Freq <- tetraplod_test_table$Freq/sum(tetraplod_test_table$Freq)
+
+
+
+```
+
+
+
+```{r}
+
+library(ggplot2)
+
+
+# Plot the distributions
+ggplot(tetraplod_test_table, aes(x = Var1, y = Freq)) +
+  geom_point() +  # Line for first distribution  
+  labs(title = "Binomial Distributions", 
+       x = "Number of Successes", 
+       y = "Probability") +
+  xlim(-1,1) + 
+  ylim(0,0.5) +
+  #scale_x_continuous(breaks = seq(0, max(c(n1, n2)), 5)) +  # Adjust x-axis breaks for clarity
+  theme_bw()  # Use black and white theme
+
+```
+
+The simulator works fine i guess i only have to ignore -1 and 1 sites and thats it.
+
+
+# Attempt at ML fitting
+
+
+
+## Binom funcs
+
+```{r}
+compute_base_probability_table <- function(max_read_depth,peak_probs_list){
+  
+  probability_table <- data.frame()
+  
+  for (read_depth in c(2:max_read_depth)){
+    for (peak_prob_name in names(peak_probs_list)){
+      data_r <-restricted_freq_distr_viable(read_depth, peak_probs_list[[peak_prob_name]])
+      data_r$peak_type <- peak_prob_name
+      data_r$read_depth <- read_depth
+      probability_table <- rbind(probability_table, data_r)
+    }
+  }
+  return(probability_table)
+}
+
+
+
+restricted_freq_distr_viable <- function(read_depth, peak_probs){
+  reads_a <- seq(1,read_depth-1,1)
+  reads_b <- seq(read_depth-1,1,-1)
+  
+  # Strong future optimization of this double binom estimation 
+  read_binom_probs_a <- dbinom(reads_a,size = read_depth, prob = peak_probs[1])
+  read_binom_probs_b <- dbinom(reads_a,size = read_depth, prob = peak_probs[2])
+  
+  final_freqs <- (reads_a - reads_b) / read_depth
+  
+  final_freqs_probs <- (read_binom_probs_a + read_binom_probs_b ) / (2*sum(read_binom_probs_a))
+  
+  final_df <- data.frame(freqs = final_freqs, probs = final_freqs_probs)
+  
+  return(final_df)
+  
+}
+
+compute_pmf_probs <- function(base_prob_table, read_depth_distr, central_prop){
+  read_depth_table <- as.data.frame(table(read_depth_distr))
+  
+  out_ward_prop <- (1-central_prop)
+  
+  
+  filtered_base_table <- base_prob_table[base_prob_table$read_depth %in% read_depth_table$read_depth_distr,]
+  
+  filtered_base_table[filtered_base_table$peak_type == "0.5_0.5",c("probs")] <- filtered_base_table[filtered_base_table$peak_type == "0.5_0.5",c("probs")] * central_prop
+
+  filtered_base_table[filtered_base_table$peak_type == "0.25_0.75",c("probs")] <- filtered_base_table[filtered_base_table$peak_type == "0.25_0.75",c("probs")] * out_ward_prop
+  
+  final_weights <- aggregate(probs ~ freqs, filtered_base_table, FUN = sum)
+  
+  # I rest 1 at the end because read depths of 1 get ignored.....
+  final_weights$probs <- final_weights$probs / (length(read_depth_table$read_depth_distr) - 1)
+  
+  return(final_weights)
+}
+
+simple_pmf_function <- function(x, final_pmf_weights){
+  if (x %in% final_pmf_weights$freqs){
+    return(final_pmf_weights[final_pmf_weights$freqs == x, c("probs")])
+  }else{
+    return(0)
+  }
+}
+
+simple_cdf_func <- function(x,weights) {
+  # Check if weights is a data frame with columns 'freqs' and 'probs'
+  if (!all(c("freqs", "probs") %in% names(weights))) {
+    stop("weights must be a data frame with columns 'freqs' and 'probs'")
+  }
+  
+  # Sort weights by 'freqs' in ascending order
+  weights <- weights[order(weights$freqs), ]
+
+  
+  cdf_probs <-c()
+  
+  for (val in x){
+    #print(val)
+    # Initialize cumulative probability
+    cdf <- 0
+    # Loop through weights and calculate cumulative sum
+    for (i in 1:nrow(weights)) {
+      if (weights$freqs[i] <= val) {
+        cdf <- cdf + weights$probs[i]
+      } else {
+        cdf_probs <- c(cdf_probs,cdf)
+        break  # Stop iterating when freqs exceed x
+      }
+    }
+    #print("Precheck")
+    #print(weights$freqs[-1])
+    if (val >= tail(weights$freqs,n=1)){
+      cdf_probs <- c(cdf_probs,1)       
+    }
+  }
+  return(cdf_probs)
+}
+```
+
+
+## ML fitting
+
+```{r}
+library(MASS)
+
+```
+s
