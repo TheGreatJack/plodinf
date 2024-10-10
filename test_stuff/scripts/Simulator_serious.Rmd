@@ -471,22 +471,86 @@ ggplot(tetraplod_test_table, aes(x = Var1, y = probs)) +
 
 ```
 
-I will compare now the simulation with the theoretical in a more straightforward way. 
-
-
-
+I will compare now the simulation with the theoretical in a more straightforward way. Merging of tables and checking
 
 
 ```{r}
-read_depth <- 10
-reads_a <- seq(1,read_depth-1,1)
-reads_b <- seq(read_depth-1,1,-1)
 
-# Strong future optimization of this double binom estimation 
-read_binom_probs_a <- dbinom(reads_a,size = read_depth, prob = c(0.25,0.75))
-read_binom_probs_b <- dbinom(reads_a,size = read_depth, prob = c(0.5,0.5))
-
-sum(read_binom_probs_a)
-sum(read_binom_probs_b)
+model_simu_merge <- merge(final_pmf_weights_test, tetraplod_test_table, by.x = "freqs", by.y = "Var1", all.x = TRUE)
 ```
+
+
+```{r}
+
+merge_with_tol <- function(model_pmf, simulation_pmf, tolerance) {
+  
+  myDists <- outer(model_pmf$freqs, simulation_pmf$sim_freqs, FUN=function(x, y) abs(x - y))
+  matches <- which(myDists <= tolerance, arr.ind=TRUE)
+  #print(matches)
+  if (length(matches[,"col"]) < length(simulation_pmf$freqs)){
+    print("missing fractions in sim_pmf")
+  }
+  
+  model_pmf[,colnames(simulation_pmf)] <- NA
+  model_pmf[,"probs"] <- 0
+  
+  model_pmf[matches[,"row"], colnames(simulation_pmf)] <- simulation_pmf[matches[,"col"],]
+  
+  return(model_pmf)
+}
+
+```
+
+```{r}
+colnames(tetraplod_test_table) <- c("sim_freqs", "Freq", "probs")
+
+model_simu_merge <- merge_with_tol(final_pmf_weights_test, tetraplod_test_table, tolerance = 1e-10)
+
+plot_mod_simu_merge <- model_simu_merge[,c("freqs", "corrected_probs")]
+colnames(plot_mod_simu_merge) <- c("freqs", "probs")
+plot_mod_simu_merge$type <- "model_probs"
+
+simu_pdf_corr <- model_simu_merge[,c("freqs", "probs")]
+simu_pdf_corr$type <- "simulated_probs"
+
+plot_mod_simu_merge <- rbind(plot_mod_simu_merge, simu_pdf_corr)
+
+
+```
+
+
+```{r}
+ggplot(plot_mod_simu_merge, aes(x = freqs, y = probs, color = type)) +
+  geom_point(alpha = 0.5) +  # Line for first distribution  
+  labs(title = "Binomial Distributions", 
+       x = "Number of Successes", 
+       y = "Probability") +
+  xlim(-1,1) + 
+  ylim(0,0.2) +
+  #scale_x_continuous(breaks = seq(0, max(c(n1, n2)), 5)) +  # Adjust x-axis breaks for clarity
+  theme_bw()  # Use black and white theme
+
+```
+
+# Optim function creation
+
+```{r}
+
+
+optim_func_4n <- function(central_prop, base_probability_test = base_probability_test, read_depth_distr = read_depth_distr, tetraplod_test_table = tetraplod_test_table){
+  print(1)
+  final_pmf_weights_test <- compute_pmf_probs(base_probability_test, read_depth_distr, central_prop)
+  
+  print(2)
+  colnames(tetraplod_test_table) <- c("sim_freqs", "Freq", "probs")
+  model_simu_merge <- merge_with_tol(final_pmf_weights_test, tetraplod_test_table, tolerance = 1e-10)
+  
+  model_error <- sum(abs(model_simu_merge$corrected_probs-model_simu_merge$probs))
+  return(model_error)
+}
+
+
+optim_func_4n(central_prop = 0.2)
+```
+
 
