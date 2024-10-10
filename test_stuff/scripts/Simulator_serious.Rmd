@@ -230,7 +230,10 @@ tetraplod_test$prop_diff <- tetraplod_test$prop_diff * inversion_vector
 
 tetraplod_test_table <- as.data.frame(table(tetraplod_test$prop_diff))
 tetraplod_test_table$Var1 <- as.numeric(as.character(tetraplod_test_table$Var1))
-tetraplod_test_table$Freq <- tetraplod_test_table$Freq/sum(tetraplod_test_table$Freq)
+
+tetraplod_test_table <- tetraplod_test_table[!(tetraplod_test_table$Var1 %in% c(-1,1)),]
+
+tetraplod_test_table$probs <- tetraplod_test_table$Freq/sum(tetraplod_test_table$Freq)
 
 
 
@@ -244,8 +247,8 @@ library(ggplot2)
 
 
 # Plot the distributions
-ggplot(tetraplod_test_table, aes(x = Var1, y = Freq)) +
-  geom_point() +  # Line for first distribution  
+ggplot(tetraplod_test_table, aes(x = Var1, y = probs)) +
+  geom_point(alpha = 0.5) +  # Line for first distribution  
   labs(title = "Binomial Distributions", 
        x = "Number of Successes", 
        y = "Probability") +
@@ -259,7 +262,17 @@ ggplot(tetraplod_test_table, aes(x = Var1, y = Freq)) +
 The simulator works fine i guess i only have to ignore -1 and 1 sites and thats it.
 
 
-# Attempt at ML fitting
+# Fitting of distr to empirical data
+
+I did a previous testing. I do not remember why but fitdistr of MASS just didn't work. In the end i used optim, that is also used within firdistr. I realized that i only have 1 variable to modify in my model. And that was only in the 4n and above case. Said variable was the central peak proportion. In the 2n and 3n is like the distribution is set.
+
+Another problem i got is i think that of realized probabilities. In summary is that some read proportions although possible have very little probability of being observed. So in an empirical setting there is going to be zero observations of said proportions. My theory is that these missing proportions enhance the probability of already high probability read proportions. That "lost probability" must go somewhere. 
+
+So i cannot fit an empirical distribution directly to the theorethical distribution. The empirical distribution should also be modeled by a factor that biases the read porportion probabilities given the number of reads sampled. Whats the expected empirical distribution of a theoretical distribution given a particular level of sampling?. At the end it has to do with the relationship between sampling and variance i guess. 
+
+I shall replicate this problem and try to solve it by sampling the theorethical distribution then comparing it to an empirical simulation. 
+
+After trying for a while i found out that i had a mistake in the function that was computing the final pmf probabilities, and also in the per read depth probabilities. I was assuming that every read depth was equally likely for some reason. Now the simulation and the theorethical look a bit more similar. It kinda makes me think that i should also include the "hidden" snps in the model. I'll test that. Also the model cant model 2n or 3n, i should all that too. 
 
 
 
@@ -274,7 +287,7 @@ compute_base_probability_table <- function(max_read_depth,peak_probs_list){
     for (peak_prob_name in names(peak_probs_list)){
       data_r <-restricted_freq_distr_viable(read_depth, peak_probs_list[[peak_prob_name]])
       data_r$peak_type <- peak_prob_name
-      data_r$read_depth <- read_depth
+      #data_r$read_depth <- read_depth
       probability_table <- rbind(probability_table, data_r)
     }
   }
@@ -293,9 +306,9 @@ restricted_freq_distr_viable <- function(read_depth, peak_probs){
   
   final_freqs <- (reads_a - reads_b) / read_depth
   
-  final_freqs_probs <- (read_binom_probs_a + read_binom_probs_b ) / (2*sum(read_binom_probs_a))
+  final_freqs_probs <- (read_binom_probs_a + read_binom_probs_b ) / (sum(read_binom_probs_a,read_binom_probs_b))
   
-  final_df <- data.frame(freqs = final_freqs, probs = final_freqs_probs)
+  final_df <- data.frame(read_depth = read_depth, reads_a = reads_a , reads_b = reads_b,freqs = final_freqs, probs = final_freqs_probs)
   
   return(final_df)
   
@@ -303,6 +316,7 @@ restricted_freq_distr_viable <- function(read_depth, peak_probs){
 
 compute_pmf_probs <- function(base_prob_table, read_depth_distr, central_prop){
   read_depth_table <- as.data.frame(table(read_depth_distr))
+  read_depth_table$depth_prob <- read_depth_table$Freq / sum(read_depth_table$Freq) 
   
   out_ward_prop <- (1-central_prop)
   
@@ -313,10 +327,15 @@ compute_pmf_probs <- function(base_prob_table, read_depth_distr, central_prop){
 
   filtered_base_table[filtered_base_table$peak_type == "0.25_0.75",c("probs")] <- filtered_base_table[filtered_base_table$peak_type == "0.25_0.75",c("probs")] * out_ward_prop
   
-  final_weights <- aggregate(probs ~ freqs, filtered_base_table, FUN = sum)
+  
+  filtered_base_table <- merge(filtered_base_table, read_depth_table, by.x = "read_depth", by.y = "read_depth_distr", all.x = TRUE)
+  
+  filtered_base_table$corrected_probs <- filtered_base_table$probs * filtered_base_table$depth_prob
+  
+  final_weights <- aggregate(corrected_probs ~ freqs, filtered_base_table, FUN = sum)
   
   # I rest 1 at the end because read depths of 1 get ignored.....
-  final_weights$probs <- final_weights$probs / (length(read_depth_table$read_depth_distr) - 1)
+  #final_weights$probs <- final_weights$probs / (length(read_depth_table$read_depth_distr))
   
   return(final_weights)
 }
@@ -328,6 +347,8 @@ simple_pmf_function <- function(x, final_pmf_weights){
     return(0)
   }
 }
+
+modified_pmf_function <- 
 
 simple_cdf_func <- function(x,weights) {
   # Check if weights is a data frame with columns 'freqs' and 'probs'
@@ -364,11 +385,108 @@ simple_cdf_func <- function(x,weights) {
 }
 ```
 
+### Testing
 
-## ML fitting
 
 ```{r}
-library(MASS)
+max_read_depth <- 500
+peak_probs_list <- list("0.25_0.75"= c(0.25,0.75),"0.5_0.5" = c(0.5,0.5))
+
+base_probability_test <- compute_base_probability_table(max_read_depth,peak_probs_list)
+```
+
+
+```{r}
+#read_depth_distr <- ceiling(rexp(1000,1/4)) + 1
+#read_depth_distr <- read_depth_disrt_pois
+read_depth_distr <- tetraplod_test[!(tetraplod_test$prop_diff %in% c(-1,1)),"read_depth"]
+
+central_prop <- 0.2
+
+final_pmf_weights_test <- compute_pmf_probs(base_probability_test, read_depth_distr, central_prop)
+sum(final_pmf_weights_test$corrected_probs)
+```
+
+
+```{r}
+# Plot the distributions
+ggplot(final_pmf_weights_test, aes(x = freqs, y = corrected_probs)) +
+  geom_point(alpha = 0.5) +  # Line for first distribution  
+  labs(title = "Binomial Distributions", 
+       x = "Number of Successes", 
+       y = "Probability") +
+  xlim(-1,1) + 
+  ylim(0,0.5) +
+  #scale_x_continuous(breaks = seq(0, max(c(n1, n2)), 5)) +  # Adjust x-axis breaks for clarity
+  theme_bw()  # U
+```
+
+A simple way to test my previous suspicion is sampling from a theoretical distribution and check if the sampling is too different from the observed empirical. 
+
+
+```{r}
+size <- 772
+
+#sampled_freqs <- c(final_pmf_weights_test$freqs,-1,1)
+#sampled_probs <- c((final_pmf_weights_test$corrected_probs)*0.8,0.1,0.1)
+
+sampled_freqs <- c(final_pmf_weights_test$freqs)
+sampled_probs <- c((final_pmf_weights_test$corrected_probs))
+
+
+sample_from_theo <- sample(sampled_freqs, size = size, replace = TRUE, prob = sampled_probs)
+
+sample_from_theo_tbl <- as.data.frame(table(sample_from_theo))
+sample_from_theo_tbl$probs <- sample_from_theo_tbl$Freq/sum(sample_from_theo_tbl$Freq)
+
+sample_from_theo_tbl$freqs <- as.numeric(as.character(sample_from_theo_tbl$sample_from_theo))
 
 ```
-s
+
+```{r}
+# Plot the distributions
+ggplot(sample_from_theo_tbl, aes(x = freqs, y = probs)) +
+  geom_point(alpha = 0.5) +  # Line for first distribution  
+  labs(title = "Binomial Distributions", 
+       x = "Number of Successes", 
+       y = "Probability") +
+  xlim(-1,1) + 
+  ylim(0,0.5) +
+  #scale_x_continuous(breaks = seq(0, max(c(n1, n2)), 5)) +  # Adjust x-axis breaks for clarity
+  theme_bw()  # U
+```
+Not many differences between the theory and the sampling... something is off. 
+
+```{r}
+# Plot the distributions
+ggplot(tetraplod_test_table, aes(x = Var1, y = probs)) +
+  geom_point(alpha = 0.5) +  # Line for first distribution  
+  labs(title = "Binomial Distributions", 
+       x = "Number of Successes", 
+       y = "Probability") +
+  xlim(-1,1) + 
+  ylim(0,0.5) +
+  #scale_x_continuous(breaks = seq(0, max(c(n1, n2)), 5)) +  # Adjust x-axis breaks for clarity
+  theme_bw()  # Use black and white theme
+
+```
+
+I will compare now the simulation with the theoretical in a more straightforward way. 
+
+
+
+
+
+```{r}
+read_depth <- 10
+reads_a <- seq(1,read_depth-1,1)
+reads_b <- seq(read_depth-1,1,-1)
+
+# Strong future optimization of this double binom estimation 
+read_binom_probs_a <- dbinom(reads_a,size = read_depth, prob = c(0.25,0.75))
+read_binom_probs_b <- dbinom(reads_a,size = read_depth, prob = c(0.5,0.5))
+
+sum(read_binom_probs_a)
+sum(read_binom_probs_b)
+```
+
