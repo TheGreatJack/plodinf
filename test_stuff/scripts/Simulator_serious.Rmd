@@ -86,7 +86,9 @@ Take the read depth table, and iterate over each depth using the frequency as th
 ```{r}
 snp_simulator_2n_4n <- function(current_ploidy, read_depth_table,central_prop) {
   
-  
+  read_depth_table <- as.data.frame(table(read_depth_table))
+  read_depth_table$read_depth_table <- as.numeric(as.character(read_depth_table$read_depth_table))
+
   # Define biallelic frequencies for different ploidies
   biallelic_freqs_diploid <- list(c(0.5, 0.5))
   biallelic_freqs_triploid <- list(c(0.33, 0.66))
@@ -194,6 +196,23 @@ snp_gen_tetraploid <- function(biallelic_freqs, read_depth_table, central_prop) 
   return(all_props)
 }
 
+simulation_table_gen <- function(current_ploidy, read_depth_distrib, central_prop){
+  
+  simulation_table <- snp_simulator_2n_4n(current_ploidy, read_depth_distrib,central_prop)
+  
+  inversion_vector <- sample(c(-1,1), size = length(simulation_table$prop_diff),replace = TRUE)
+  simulation_table$prop_diff <- simulation_table$prop_diff * inversion_vector
+  
+  simulation_test_table <- as.data.frame(table(simulation_table$prop_diff))
+  simulation_test_table$Var1 <- as.numeric(as.character(simulation_test_table$Var1))
+  
+  simulation_test_table <- simulation_test_table[!(simulation_test_table$Var1 %in% c(-1,1)),]
+  
+  simulation_test_table$probs <- simulation_test_table$Freq/sum(simulation_test_table$Freq)
+  
+  return(simulation_test_table)
+  }
+
 ```
 
 
@@ -220,7 +239,7 @@ pois_depth_distr
 
 ```{r}
 current_ploidy <- 4
-read_depth_table <- pois_depth_distr
+read_depth_table <- read_depth_disrt_pois
 central_prop <- 0.2
 
 tetraplod_test <- snp_simulator_2n_4n(current_ploidy, read_depth_table,central_prop)
@@ -487,7 +506,8 @@ merge_with_tol <- function(model_pmf, simulation_pmf, tolerance) {
   myDists <- outer(model_pmf$freqs, simulation_pmf$sim_freqs, FUN=function(x, y) abs(x - y))
   matches <- which(myDists <= tolerance, arr.ind=TRUE)
   #print(matches)
-  if (length(matches[,"col"]) < length(simulation_pmf$freqs)){
+  #print(c(length(matches[,"col"]),length(simulation_pmf$sim_freqs)))
+  if (length(matches[,"col"]) < length(simulation_pmf$sim_freqs)){
     print("missing fractions in sim_pmf")
   }
   
@@ -537,20 +557,60 @@ ggplot(plot_mod_simu_merge, aes(x = freqs, y = probs, color = type)) +
 ```{r}
 
 
-optim_func_4n <- function(central_prop, base_probability_test = base_probability_test, read_depth_distr = read_depth_distr, tetraplod_test_table = tetraplod_test_table){
-  print(1)
-  final_pmf_weights_test <- compute_pmf_probs(base_probability_test, read_depth_distr, central_prop)
+optim_func_4n <- function(central_prop, base_probability_table = base_probability_test, read_depth_distrib = read_depth_distr_test, sim_table = simulation_table){
+
+  final_pmf_weights_test <- compute_pmf_probs(base_probability_table, read_depth_distrib, central_prop)
   
-  print(2)
-  colnames(tetraplod_test_table) <- c("sim_freqs", "Freq", "probs")
-  model_simu_merge <- merge_with_tol(final_pmf_weights_test, tetraplod_test_table, tolerance = 1e-10)
+  colnames(sim_table) <- c("sim_freqs", "Freq", "probs")
+  model_simu_merge <- merge_with_tol(final_pmf_weights_test, sim_table, tolerance = 1e-12)
+  
+  #print(model_simu_merge)
   
   model_error <- sum(abs(model_simu_merge$corrected_probs-model_simu_merge$probs))
   return(model_error)
 }
 
+read_depth_distr_test <- read_depth_distr
+simulation_table <- tetraplod_test_table
+optim_func_4n(central_prop = 0.8)
+```
+```{r}
+optim(0.5, optim_func_4n,method= "L-BFGS-B" ,lower = 0, upper = 1)
+```
 
+
+```{r}
+max_depth <- 200
+average_pois <- 15
+number_of_sites <- 2000
+
+read_depth_pos <- seq(2,max_depth)
+pois_distr <- dpois(read_depth_pos,average_pois)
+
+read_depth_disrt_pois <- sample(read_depth_pos,number_of_sites,replace = TRUE, prob = pois_distr)
+#as.data.frame(table(read_depth_disrt_pois))
+
+#pois_depth_distr <- as.data.frame(table(read_depth_disrt_pois))
+#pois_depth_distr$read_depth_disrt_pois <- as.numeric(as.character(pois_depth_distr$read_depth_disrt_pois))
+
+current_ploidy <- 3
+central_prop <- 0.8
+
+sim_table_02 <- simulation_table_gen(current_ploidy, read_depth_disrt_pois, central_prop)
+```
+
+
+```{r}
+read_depth_distr_test <- read_depth_disrt_pois
+simulation_table <- sim_table_02
 optim_func_4n(central_prop = 0.2)
+```
+
+
+```{r}
+read_depth_distr_test <- read_depth_disrt_pois
+simulation_table <- sim_table_02
+optim(0.5, optim_func_4n,method= "L-BFGS-B" ,lower = 0, upper = 1)
 ```
 
 
