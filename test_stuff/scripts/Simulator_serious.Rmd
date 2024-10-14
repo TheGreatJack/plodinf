@@ -563,6 +563,7 @@ merge_with_tol <- function(model_pmf, simulation_pmf, tolerance) {
   #print(c(length(matches[,"col"]),length(simulation_pmf$sim_freqs)))
   if (length(matches[,"col"]) < length(simulation_pmf$sim_freqs)){
     print("missing fractions in sim_pmf")
+    print(c(length(matches[,"col"]),length(simulation_pmf$sim_freqs)))
   }
   
   model_pmf[,colnames(simulation_pmf)] <- NA
@@ -683,11 +684,12 @@ Optim functions in this context are nothing more than an error estimation betwee
 
 
 optim_func_4n <- function(central_prop, base_probability_table = base_probability_test, read_depth_distrib = read_depth_distr_test, sim_table = simulation_table){
-
-  final_pmf_weights_test <- compute_pmf_probs_4n(base_probability_table, read_depth_distrib, central_prop)
+  
+  tetraplod_peak_types <- c("0.25_0.75","0.5_0.5")
+  final_pmf_weights_test <- compute_pmf_probs_4n(base_probability_table, read_depth_distrib, central_prop, tetraplod_peak_types)
   
   colnames(sim_table) <- c("sim_freqs", "Freq", "probs")
-  model_simu_merge <- merge_with_tol(final_pmf_weights_test, sim_table, tolerance = 1e-12)
+  model_simu_merge <- merge_with_tol(final_pmf_weights_test, sim_table, tolerance = 1e-8)
   
   #print(model_simu_merge)
   
@@ -695,12 +697,54 @@ optim_func_4n <- function(central_prop, base_probability_table = base_probabilit
   return(model_error)
 }
 
-read_depth_distr_test <- read_depth_distr
-simulation_table <- tetraplod_test_table
-optim_func_4n(central_prop = 0.8)
+c_value_optimization  <- function(sim_table){
+  
+}
+
+plot_model_simu <- function(central_prop, base_probability_table = base_probability_test, read_depth_distrib = read_depth_distr_test, sim_table = simulation_table){
+  
+  tetraplod_peak_types <- c("0.25_0.75","0.5_0.5")
+  final_pmf_weights_test <- compute_pmf_probs_4n(base_probability_table, read_depth_distrib, central_prop, tetraplod_peak_types)
+  
+  colnames(sim_table) <- c("sim_freqs", "Freq", "probs")
+  model_simu_merge <- merge_with_tol(final_pmf_weights_test, sim_table, tolerance = 1e-8)
+  
+  plot_mod_simu_merge <- model_simu_merge[,c("freqs", "corrected_probs")]
+  colnames(plot_mod_simu_merge) <- c("freqs", "probs")
+  plot_mod_simu_merge$type <- "model_probs"
+  
+  simu_pdf_corr <- model_simu_merge[,c("freqs", "probs")]
+  simu_pdf_corr$type <- "simulated_probs"
+  
+  plot_mod_simu_merge <- rbind(plot_mod_simu_merge, simu_pdf_corr)
+  
+  ggplot(plot_mod_simu_merge, aes(x = freqs, y = probs, color = type)) +
+    geom_point(alpha = 0.5) +  # Line for first distribution  
+    labs(title = "Binomial Distributions", 
+         x = "Number of Successes", 
+         y = "Probability") +
+    xlim(-1,1) + 
+    ylim(0,0.2) +
+    #scale_x_continuous(breaks = seq(0, max(c(n1, n2)), 5)) +  # Adjust x-axis breaks for clarity
+    theme_bw()  # Use black and white them
+  
+}
+
+read_depth_distr_test <- pois_distr_gen(500, 10, 100)
+simulation_table <- simulation_table_gen(4, read_depth_distr_test, 0.2)
+#simulation_table <- compute_pmf_probs_4n(base_probability_test, read_depth_distr_test, 0.2, c("0.25_0.75","0.5_0.5"))
+#simulation_table$probs <- simulation_table$corrected_probs
+optim_func_4n(central_prop = 0.2)
 ```
 ```{r}
 optim(0.5, optim_func_4n,method= "L-BFGS-B" ,lower = 0, upper = 1)
+```
+
+```{r}
+optim(0.5, optim_func_4n,method= "Brent" ,lower = 0, upper = 1)$par
+```
+```{r}
+plot_model_simu(central_prop = 0.2)
 ```
 
 
@@ -745,18 +789,24 @@ optim(0.5, optim_func_4n,method= "L-BFGS-B" ,lower = 0, upper = 1)
 
 
 ```{r}
-experiment_func <- function(){
+experiment_func <- function(base_probability_table){
   max_depth <- 200
-  ploidies_sim <- c(2)
+  ploidies_sim <- c(3)
   averages_poisson <- c(5)
   site_numbers <- c(1000)
-  c_value < 0.5
+  c_value <- 0.5
   reps <- 100
+  
+  evaluation_df <- data.frame()
+  
+  estimated_iter <- length(ploidies_sim) * length(averages_poisson) * length(site_numbers) * reps * 3
+  pb = txtProgressBar(min = 0, max = estimated_iter, initial = 0, style = 3) 
+  counter <- 0
   
   for (ploidy in ploidies_sim){
     for (possion_avg in averages_poisson){
       for (site_number in site_numbers){
-        for (i in c()){
+        for (i in c(1:reps)){
           if (ploidy == 4){
             # read_depth_gen
             read_depth_disrt_pois <- pois_distr_gen(max_depth,possion_avg, site_number)
@@ -768,17 +818,85 @@ experiment_func <- function(){
           }
           
           # Model stuff
+          results_df <- model_plodies_evaluator(sim_table, base_probability_table, read_depth_disrt_pois)
           
+          results_df$simulation_ploidy <- ploidy
+          results_df$simulation_pois_avg <- possion_avg
+          results_df$simulation_site_number <- site_number
+          results_df$simluation_rep <- i
+          
+          evaluation_df <- rbind(evaluation_df, results_df)
+          setTxtProgressBar(pb,counter)
+          counter <- counter + 1
         }
       }
     }
   }
+  close(pb)
+  return(evaluation_df)
 }
 
-model_plodies_evaluator <- function(sim_table){
-  for (ploidy in c(2,3,4)){
+model_plodies_evaluator <- function(sim_table, base_probability_table, read_depth_disrt_pois){
+  error_vector <- c()
+  for (ploidy in c(2,3)){
+    model_pmf <- generate_model_aggregate_func(base_probability_table, ploidy, read_depth_disrt_pois)
+    model_error <- error_model_sim(model_pmf,sim_table)
+    error_vector <- c(error_vector, model_error)
     
   }
+
+  # Tetraplod part
+  tetraplod_optim <- optim(0.5, optim_func_4n,method= "L-BFGS-B" ,lower = 0, upper = 1, base_probability_table = base_probability_table, read_depth_distrib = read_depth_disrt_pois,  sim_table = sim_table)
+  
+  error_vector <- c(error_vector, tetraplod_optim$value)
+  
+  results_df <- data.frame("model_ploidy" = c(2,3,4), "model_error" = error_vector, "model_c_value" = c(NA,NA,tetraplod_optim$par))
+  
+  return(results_df)
 }
+```
+
+
+
+## Testing
+
+```{r}
+test_result <- experiment_func(base_probability_test)
+```
+
+
+
+```{r}
+ggplot(test_result, aes(x=model_error, fill=factor(model_ploidy))) +
+  geom_histogram(position = 'identity', binwidth = 0.005, alpha = 0.5)
+  #scale_fill_manual(values=c("#69b3a2", "#404080")) +
+  #theme_ipsum() +
+  #labs(fill="")
+```
+
+```{r}
+n_iter <- 50 # Número de iteraciones del bucle
+# Inicializa la barra de progreso
+pb <- txtProgressBar(min = 0,      # Valor mínimo de la barra de progreso
+                     max = n_iter, # Valor máximo de la barra de progreso
+                     style = 3,    # Estilo de la barra (también style = 1 y style = 2)
+                     width = 50,   # Ancho de la barra. Por defecto: getOption("width")
+                     char = "=")   # Carácter usado para crear la barra
+
+for(i in 1:n_iter) {
+
+    #-------------------
+    # Aquí va tu código:
+    #-------------------
+  
+    Sys.sleep(0.1) # Borra esta línea y añade tu código
+  
+    #-------------------
+ 
+    # Actualiza la barra de progreso al estado actual
+    setTxtProgressBar(pb, i)
+}
+
+close(pb) # Cerramos la conexión
 ```
 
