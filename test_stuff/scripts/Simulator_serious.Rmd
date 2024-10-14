@@ -76,6 +76,23 @@ as.data.frame(table(read_depth_distr_exp))
 
 ```
 
+## Read depth distr func generator
+
+```{r}
+pois_distr_gen <- function(max_depth,average_pois, number_of_sites, min_depth = 2){
+  read_depth_pos <- seq(min_depth,max_depth)
+  pois_distr <- dpois(read_depth_pos,average_pois)
+  
+  read_depth_disrt_pois <- sample(read_depth_pos,number_of_sites,replace = TRUE, prob = pois_distr)
+  
+  return(read_depth_disrt_pois)
+}
+```
+
+```{r}
+pois_distr_gen(500, 10, 100)
+```
+
 
 # Simulator big itself
 
@@ -84,14 +101,14 @@ Take the read depth table, and iterate over each depth using the frequency as th
 
 
 ```{r}
-snp_simulator_2n_4n <- function(current_ploidy, read_depth_table,central_prop) {
+snp_simulator_2n_4n <- function(current_ploidy, read_depth_table,central_prop = 0) {
   
   read_depth_table <- as.data.frame(table(read_depth_table))
   read_depth_table$read_depth_table <- as.numeric(as.character(read_depth_table$read_depth_table))
 
   # Define biallelic frequencies for different ploidies
   biallelic_freqs_diploid <- list(c(0.5, 0.5))
-  biallelic_freqs_triploid <- list(c(0.33, 0.66))
+  biallelic_freqs_triploid <- list(c(1/3, 2/3))
   biallelic_freqs_tetraploid <- list(c(0.5,0.5),c(0.25, 0.75))
   
 
@@ -333,14 +350,15 @@ restricted_freq_distr_viable <- function(read_depth, peak_probs){
   
 }
 
-compute_pmf_probs <- function(base_prob_table, read_depth_distr, central_prop){
+compute_pmf_probs_4n <- function(base_prob_table, read_depth_distr, central_prop, ploidy_peak_types){
   read_depth_table <- as.data.frame(table(read_depth_distr))
   read_depth_table$depth_prob <- read_depth_table$Freq / sum(read_depth_table$Freq) 
   
   out_ward_prop <- (1-central_prop)
   
+  filtered_base_table <- base_prob_table[(base_prob_table$read_depth %in% read_depth_table$read_depth_distr) &
+                                         (base_prob_table$peak_type %in% ploidy_peak_types),]
   
-  filtered_base_table <- base_prob_table[base_prob_table$read_depth %in% read_depth_table$read_depth_distr,]
   
   filtered_base_table[filtered_base_table$peak_type == "0.5_0.5",c("probs")] <- filtered_base_table[filtered_base_table$peak_type == "0.5_0.5",c("probs")] * central_prop
 
@@ -357,6 +375,38 @@ compute_pmf_probs <- function(base_prob_table, read_depth_distr, central_prop){
   #final_weights$probs <- final_weights$probs / (length(read_depth_table$read_depth_distr))
   
   return(final_weights)
+}
+
+compute_pmf_probs_2n_3n <- function(base_prob_table, read_depth_distr, ploidy_peak_types){
+  read_depth_table <- as.data.frame(table(read_depth_distr))
+  read_depth_table$depth_prob <- read_depth_table$Freq / sum(read_depth_table$Freq) 
+  
+  filtered_base_table <- base_prob_table[(base_prob_table$read_depth %in% read_depth_table$read_depth_distr) &
+                                         (base_prob_table$peak_type %in% ploidy_peak_types),]
+  
+  filtered_base_table <- merge(filtered_base_table, read_depth_table, by.x = "read_depth", by.y = "read_depth_distr", all.x = TRUE)
+  
+  filtered_base_table$corrected_probs <- filtered_base_table$probs * filtered_base_table$depth_prob
+  
+  final_weights <- aggregate(corrected_probs ~ freqs, filtered_base_table, FUN = sum)
+  
+  return(final_weights)
+}
+
+generate_model_aggregate_func <- function(base_prob_table, current_ploidy, read_depth_distr,central_prop = 0){
+
+
+  if (current_ploidy == 2) {
+    ploidy_peak_types <- c("0.5_0.5")
+    model_pmf_weights <- compute_pmf_probs_2n_3n(base_prob_table, read_depth_distr, ploidy_peak_types)
+  } else if (current_ploidy == 3) {
+    ploidy_peak_types <- c("0.33_0.66")
+    model_pmf_weights <- compute_pmf_probs_2n_3n(base_prob_table, read_depth_distr, ploidy_peak_types)
+  } else if (current_ploidy == 4){
+    ploidy_peak_types <- c("0.25_0.75","0.5_0.5")
+    model_pmf_weights <- compute_pmf_probs_4n(base_prob_table, read_depth_distr, central_prop, ploidy_peak_types)
+  }
+   return(model_pmf_weights)
 }
 
 simple_pmf_function <- function(x, final_pmf_weights){
@@ -409,7 +459,7 @@ simple_cdf_func <- function(x,weights) {
 
 ```{r}
 max_read_depth <- 500
-peak_probs_list <- list("0.25_0.75"= c(0.25,0.75),"0.5_0.5" = c(0.5,0.5))
+peak_probs_list <- list("0.25_0.75"= c(0.25,0.75),"0.5_0.5" = c(0.5,0.5), "0.33_0.66" = c(1/3,2/3))
 
 base_probability_test <- compute_base_probability_table(max_read_depth,peak_probs_list)
 ```
@@ -421,8 +471,9 @@ base_probability_test <- compute_base_probability_table(max_read_depth,peak_prob
 read_depth_distr <- tetraplod_test[!(tetraplod_test$prop_diff %in% c(-1,1)),"read_depth"]
 
 central_prop <- 0.2
+tetraplod_peak_types <- c("0.25_0.75","0.5_0.5")
 
-final_pmf_weights_test <- compute_pmf_probs(base_probability_test, read_depth_distr, central_prop)
+final_pmf_weights_test <- compute_pmf_probs_4n(base_probability_test, read_depth_distr, central_prop, tetraplod_peak_types)
 sum(final_pmf_weights_test$corrected_probs)
 ```
 
@@ -498,6 +549,9 @@ I will compare now the simulation with the theoretical in a more straightforward
 model_simu_merge <- merge(final_pmf_weights_test, tetraplod_test_table, by.x = "freqs", by.y = "Var1", all.x = TRUE)
 ```
 
+#### Tolerance merging test
+
+Merge near equal values
 
 ```{r}
 
@@ -552,14 +606,85 @@ ggplot(plot_mod_simu_merge, aes(x = freqs, y = probs, color = type)) +
 
 ```
 
+
+### Aggregate func testing
+
+```{r}
+
+read_depth_distr <- rep(10,1000)
+ploidy = 2
+
+test_aggregate_model <- generate_model_aggregate_func(base_probability_test, ploidy, read_depth_distr)
+
+```
+
+
+```{r}
+# Plot the distributions
+ggplot(test_aggregate_model, aes(x = freqs, y = corrected_probs)) +
+  geom_point(alpha = 0.5) +  # Line for first distribution  
+  labs(title = "Binomial Distributions", 
+       x = "Number of Successes", 
+       y = "Probability") +
+  xlim(-1,1) + 
+  ylim(0,0.5) +
+  #scale_x_continuous(breaks = seq(0, max(c(n1, n2)), 5)) +  # Adjust x-axis breaks for clarity
+  theme_bw()  # U
+```
+
+```{r}
+read_depth_distr <- rep(4,1000)
+ploidy = 4
+central_prop = 0.1
+
+test_aggregate_model <- generate_model_aggregate_func(base_probability_test, ploidy, read_depth_disrt_pois, central_prop)
+
+```
+
+```{r}
+# Plot the distributions
+ggplot(test_aggregate_model, aes(x = freqs, y = corrected_probs)) +
+  geom_point(alpha = 0.5) +  # Line for first distribution  
+  labs(title = "Binomial Distributions", 
+       x = "Number of Successes", 
+       y = "Probability") +
+  xlim(-1,1) + 
+  ylim(0,0.5) +
+  #scale_x_continuous(breaks = seq(0, max(c(n1, n2)), 5)) +  # Adjust x-axis breaks for clarity
+  theme_bw()  # U
+```
+# Error estimation function
+
+```{r}
+error_model_sim <- function(final_pmf_weights_test,sim_table){
+  colnames(sim_table) <- c("sim_freqs", "Freq", "probs")
+  model_simu_merge <- merge_with_tol(final_pmf_weights_test, sim_table, tolerance = 1.5e-8)
+  
+  #print(model_simu_merge)
+  
+  model_error <- sum(abs(model_simu_merge$corrected_probs-model_simu_merge$probs))
+  return(model_error)
+}
+```
+
+
+```{r}
+error_model_sim(test_aggregate_model, tetraplod_test_table)
+```
+
+
+
 # Optim function creation
+
+Optim functions in this context are nothing more than an error estimation between model and simulation.
+
 
 ```{r}
 
 
 optim_func_4n <- function(central_prop, base_probability_table = base_probability_test, read_depth_distrib = read_depth_distr_test, sim_table = simulation_table){
 
-  final_pmf_weights_test <- compute_pmf_probs(base_probability_table, read_depth_distrib, central_prop)
+  final_pmf_weights_test <- compute_pmf_probs_4n(base_probability_table, read_depth_distrib, central_prop)
   
   colnames(sim_table) <- c("sim_freqs", "Freq", "probs")
   model_simu_merge <- merge_with_tol(final_pmf_weights_test, sim_table, tolerance = 1e-12)
@@ -613,4 +738,47 @@ simulation_table <- sim_table_02
 optim(0.5, optim_func_4n,method= "L-BFGS-B" ,lower = 0, upper = 1)
 ```
 
+
+
+
+# Model experiments
+
+
+```{r}
+experiment_func <- function(){
+  max_depth <- 200
+  ploidies_sim <- c(2)
+  averages_poisson <- c(5)
+  site_numbers <- c(1000)
+  c_value < 0.5
+  reps <- 100
+  
+  for (ploidy in ploidies_sim){
+    for (possion_avg in averages_poisson){
+      for (site_number in site_numbers){
+        for (i in c()){
+          if (ploidy == 4){
+            # read_depth_gen
+            read_depth_disrt_pois <- pois_distr_gen(max_depth,possion_avg, site_number)
+            sim_table <- simulation_table_gen(ploidy, read_depth_disrt_pois, c_value)
+          }else{
+            # read_depth_gen
+            read_depth_disrt_pois <- pois_distr_gen(max_depth,possion_avg, site_number)
+            sim_table <- simulation_table_gen(ploidy, read_depth_disrt_pois, central_prop = 0) 
+          }
+          
+          # Model stuff
+          
+        }
+      }
+    }
+  }
+}
+
+model_plodies_evaluator <- function(sim_table){
+  for (ploidy in c(2,3,4)){
+    
+  }
+}
+```
 
